@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v3
 
       # 设置Java运行环境(temurin是开源jdk)，可以设置为: 1.8
-      - uses: actions/setup-java@v3
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 11
