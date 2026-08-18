@@ -1,7 +1,6 @@
 name: Release
 
 # 触发条件: 这里是push以”v“开头的tag触发
-name: Build and Release Android APK
 
 on:
   push:
