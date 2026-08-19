@@ -23,41 +23,57 @@ class BackgroundMusicManager(private val appContext: Context) {
 
     /** 是否启用循环播放。 */
     @Volatile
-    var enabled: Boolean = true
+    private var enabled: Boolean = true
 
     /** 当前激活的环境音。 */
     @Volatile
-    var ambient: AmbientSound = AmbientSounds.CALM
-        private set
+    private var ambient: AmbientSound = AmbientSounds.CALM
 
     /** 音量 0..1。 */
     @Volatile
-    var volume: Float = 0.45f
+    private var volume: Float = 0.45f
+
+
+    fun isEnabled(): Boolean = enabled
+
+    fun getAmbient(): AmbientSound = ambient
+
+    fun getVolume(): Float = volume
+
 
     fun start() {
         if (!enabled) return
         if (player != null && player?.isPlaying == true) return
+
         try {
             val mp = MediaPlayer()
             applyAudioAttributes(mp)
+
             mp.setOnPreparedListener { p ->
                 p.isLooping = true
                 p.setVolume(volume, volume)
                 p.start()
                 Log.i(tag, "Background music started: ${ambient.id}")
             }
+
             mp.setOnErrorListener { _, what, extra ->
-                Log.e(tag, "MediaPlayer error what=$what extra=$extra (ambient=${ambient.id})")
+                Log.e(
+                    tag,
+                    "MediaPlayer error what=$what extra=$extra (ambient=${ambient.id})"
+                )
                 stop()
                 true
             }
+
             openResource(mp, ambient.rawResId)
             player = mp
+
         } catch (e: Exception) {
             Log.e(tag, "start failed: ${e.message}")
             stop()
         }
     }
+
 
     private fun applyAudioAttributes(mp: MediaPlayer) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -73,11 +89,19 @@ class BackgroundMusicManager(private val appContext: Context) {
         }
     }
 
+
     private fun openResource(mp: MediaPlayer, resId: Int) {
-        val afd: AssetFileDescriptor = appContext.resources.openRawResourceFd(resId)
+        val afd: AssetFileDescriptor =
+            appContext.resources.openRawResourceFd(resId)
+
         try {
-            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            mp.setDataSource(
+                afd.fileDescriptor,
+                afd.startOffset,
+                afd.length
+            )
             mp.prepareAsync()
+
         } finally {
             try {
                 afd.close()
@@ -87,8 +111,10 @@ class BackgroundMusicManager(private val appContext: Context) {
         }
     }
 
+
     fun setEnabled(value: Boolean) {
         enabled = value
+
         if (!value) {
             stop()
         } else {
@@ -96,41 +122,60 @@ class BackgroundMusicManager(private val appContext: Context) {
         }
     }
 
-    /**
-     * 切换环境音。若与当前值相同且正在播放则 noop；否则先 stop 再 start，
-     * 以保证音源文件可重新加载。
-     */
+
     fun setAmbient(value: AmbientSound) {
         val same = value.id == ambient.id
+
         ambient = value
+
         if (!enabled) return
-        if (same && player?.isPlaying == true) return
+
+        if (same && player?.isPlaying == true) {
+            return
+        }
+
         restartInternal()
     }
 
+
     private fun restartInternal() {
         val wasPlaying = player?.isPlaying == true
+
         stop()
-        if (wasPlaying || enabled) start()
+
+        if (wasPlaying || enabled) {
+            start()
+        }
     }
+
 
     fun setVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
         player?.setVolume(volume, volume)
     }
 
+
     fun pause() {
-        runCatching { player?.pause() }.onFailure { Log.w(tag, "pause failed: ${it.message}") }
+        runCatching {
+            player?.pause()
+        }.onFailure {
+            Log.w(tag, "pause failed: ${it.message}")
+        }
     }
+
 
     fun stop() {
         try {
             player?.let {
-                if (it.isPlaying) it.stop()
+                if (it.isPlaying) {
+                    it.stop()
+                }
                 it.release()
             }
+
         } catch (e: Exception) {
             Log.w(tag, "stop failed: ${e.message}")
+
         } finally {
             player = null
         }
