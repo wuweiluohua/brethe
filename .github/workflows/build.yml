@@ -22,17 +22,23 @@ jobs:
     timeout-minutes: 60
 
     env:
-      # SDK 安装到 runner 临时目录，与每个 job 隔离；路径固定便于 cache 命中
-      ANDROID_HOME: ${{ runner.temp }}/android-sdk
       # 与 app/build.gradle.kts 中的 compileSdk = 34 / targetSdk = 34 保持一致
       ANDROID_API_LEVEL: '34'
       ANDROID_BUILD_TOOLS: '34.0.0'
-      # cmdline-tools Aug 2024 release（与 AGP 8.5 兼容）
+      # cmdline-tools Aug 2024 release（兼容 AGP 8.5）
       CMDLINE_TOOLS_VERSION: '11076708'
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
+
+
+      - name: Set Android SDK path
+        run: |
+          echo "ANDROID_HOME=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
+
 
       - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@v5
@@ -40,74 +46,98 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+
       - name: Setup Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
 
       - name: Restore Android SDK
         id: cache-sdk
         uses: actions/cache@v4
         with:
           path: ${{ env.ANDROID_HOME }}
-          # key 包含 platforms / build-tools 版本与 Gradle 构建脚本的 hash，变更时自动失效
-          key: >-
-            android-sdk-
-            platform-${{ env.ANDROID_API_LEVEL }}-
-            buildtools-${{ env.ANDROID_BUILD_TOOLS }}-
-            cmdline-${{ env.CMDLINE_TOOLS_VERSION }}-
-            ${{ hashFiles('**/build.gradle.kts', '**/app/build.gradle.kts') }}
+          key: android-sdk-platform-${{ env.ANDROID_API_LEVEL }}-buildtools-${{ env.ANDROID_BUILD_TOOLS }}-cmdline-${{ env.CMDLINE_TOOLS_VERSION }}-${{ hashFiles('**/build.gradle.kts', '**/app/build.gradle.kts') }}
           restore-keys: |
             android-sdk-platform-${{ env.ANDROID_API_LEVEL }}-
             android-sdk-platform-
+
 
       - name: Install Android SDK (cmdline-tools + platforms + build-tools)
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
           set -e
+
           mkdir -p "$ANDROID_HOME/cmdline-tools"
+
           cd "$ANDROID_HOME/cmdline-tools"
+
           curl -fsSL -o cmdline-tools.zip \
             "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip"
+
           unzip -q cmdline-tools.zip
+
           rm -f cmdline-tools.zip
-          # 解压后默认目录是 cmdline-tools，sdkmanager 要求 cmdline-tools/latest/bin/sdkmanager
-          if [ -d latest ]; then
-            : # 已是最新的目录结构
-          elif [ -d cmdline-tools ]; then
+
+
+          # 修正 cmdline-tools/latest 目录结构
+          rm -rf latest
+
+          if [ -d cmdline-tools ]; then
             mv cmdline-tools latest
           fi
+
+
           ls -la "$ANDROID_HOME/cmdline-tools/latest/bin"
 
+
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+
           sdkmanager --version
-          yes | sdkmanager --licenses >/dev/null
+
+
+          # 接受许可证，失败不阻断
+          yes | sdkmanager --licenses >/dev/null || true
+
+
           sdkmanager \
             "platform-tools" \
             "platforms;android-${ANDROID_API_LEVEL}" \
             "build-tools;${ANDROID_BUILD_TOOLS}"
 
+
       - name: Write local.properties
-        run: echo "sdk.dir=${ANDROID_HOME}" >> local.properties
+        run: |
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
+
 
       - name: Show Gradle / JDK version
         run: |
           ./gradlew --version
           java -version
+
           echo "ANDROID_HOME=${ANDROID_HOME}"
-          ls "$ANDROID_HOME/platforms/" "$ANDROID_HOME/build-tools/"
+
+          ls "$ANDROID_HOME/platforms/"
+          ls "$ANDROID_HOME/build-tools/"
+
 
       - name: Assemble debug APK
         id: assembleDebug
         run: ./gradlew :app:assembleDebug --stacktrace
 
+
       - name: Run lint (warnings only, 不阻断构建)
         id: lint
         continue-on-error: true
         run: ./gradlew :app:lintDebug --stacktrace
+
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -117,14 +147,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lint-report
-          path: app/build/reports/lint-results-debug.html
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
           if-no-files-found: ignore
           retention-days: 7
+
 
       - name: Summary
         if: always()
