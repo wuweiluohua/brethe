@@ -29,13 +29,14 @@
             </intent-filter>
         </activity>
 
-        <!-- 文字转语音查询 -->
-        <queries>
-            <intent>
-                <action android:name="android.intent.action.TTS_SERVICE" />
-            </intent>
-        </queries>
-
     </application>
+    
+      <!-- 文字转语音查询 -->
+     <queries>
+         <intent>
+             <action android:name="android.intent.action.TTS_SERVICE" />
+         </intent>
+     </queries>
+
 
 </manifest>
