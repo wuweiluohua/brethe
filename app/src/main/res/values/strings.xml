@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">呼吸放松</string>
+
+    <!-- 主要按钮 -->
+    <string name="start_training">开始训练</string>
+    <string name="pause_training">暂停</string>
+    <string name="resume_training">继续</string>
+    <string name="stop_training">结束</string>
+
+    <!-- 阶段提示 -->
+    <string name="phase_ready">准备好</string>
+    <string name="phase_inhale">吸气</string>
+    <string name="phase_hold_inhale">屏住</string>
+    <string name="phase_hold_exhale">停顿</string>
+    <string name="phase_exhale">呼气</string>
+    <string name="phase_complete">训练完成</string>
+
+    <!-- TTS 语音 -->
+    <string name="tts_inhale">吸气</string>
+    <string name="tts_hold_inhale">屏住呼吸</string>
+    <string name="tts_hold_exhale">停顿</string>
+    <string name="tts_exhale">呼气</string>
+    <!-- 长句播报：训练中默认使用，让女声引导更细腻 -->
+    <string name="tts_phrase_inhale">慢慢地吸气，让气息充满腹部</string>
+    <string name="tts_phrase_hold_inhale">轻轻地屏住，让氧气在身体里流动</string>
+    <string name="tts_phrase_exhale">缓缓地呼气，把紧张一起带走</string>
+    <string name="tts_phrase_hold_exhale">放松，静静地感受此刻的平静</string>
+    <string name="tts_phrase_prepare">把肩膀放松下来，准备好了就轻轻闭上双眼</string>
+    <string name="tts_count">第 %1$d 轮</string>
+    <string name="tts_start_478">4-7-8 放松呼吸法，准备开始</string>
+    <string name="tts_start_426">4-2-6 平衡呼吸法，准备开始</string>
+    <string name="tts_start_box">盒式呼吸，准备开始</string>
+    <string name="tts_finish">训练完成，让身体保持放松片刻</string>
+    <string name="tts_silence">静静感受</string>
+
+    <!-- 设置 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_pattern">呼吸节奏</string>
+    <string name="settings_pattern_subtitle">不同节奏适合不同场景，可以随时切换</string>
+    <string name="settings_cycles">循环轮数</string>
+    <string name="settings_cycles_subtitle">建议每天 4–8 轮，初次可从 4 轮开始</string>
+    <string name="settings_sound">温柔女声提示</string>
+    <string name="settings_sound_desc">在每个阶段开始时用中文女声播报</string>
+    <string name="settings_music">舒缓背景音乐</string>
+    <string name="settings_music_desc">训练期间循环播放柔和的环境音</string>
+    <string name="settings_haptics">触感反馈</string>
+    <string name="settings_haptics_desc">在阶段切换时给予轻柔震动</string>
+    <string name="settings_keep_screen_on">训练时保持屏幕常亮</string>
+    <string name="settings_keep_screen_on_desc">避免训练时屏幕自动锁定</string>
+
+    <!-- 节奏名 -->
+    <string name="pattern_478_name">4-7-8 放松</string>
+    <string name="pattern_478_desc">通过延长呼气激活副交感神经，适合睡前与感到焦虑时使用。</string>
+    <string name="pattern_426_name">4-2-6 平衡</string>
+    <string name="pattern_426_desc">节奏柔和，不屏息太久，适合练习入门或工作间隙使用。</string>
+    <string name="pattern_box_name">盒式 4-4-4-4</string>
+    <string name="pattern_box_desc">四段相等的对称节奏，常用于专注、演讲前或军警减压训练。</string>
+
+    <!-- 环境音名称 -->
+    <string name="ambient_calm_name">宁静氛围（默认）</string>
+    <string name="ambient_calm_desc">缓慢和弦与低频氛围，柔和无风格倾向。</string>
+    <string name="ambient_rain_name">雨声</string>
+    <string name="ambient_rain_desc">密集细雨伴稀疏雨滴，适合焦虑时的稳定陪伴。</string>
+    <string name="ambient_birds_name">林间鸟鸣</string>
+    <string name="ambient_birds_desc">清晨草地与断续鸟鸣，适合清晨或白天减压。</string>
+    <string name="ambient_ocean_name">海浪</string>
+    <string name="ambient_ocean_desc">每 8 秒一次的浪涌循环，沉浸放松。</string>
+    <string name="ambient_stream_name">溪水</string>
+    <string name="ambient_stream_desc">高频水流加上随机水花，清爽通透。</string>
+    <string name="ambient_campfire_name">篝火</string>
+    <string name="ambient_campfire_desc">低沉燃烧床 + 随机噼啪，适合睡前与冥想。</string>
+
+    <!-- 设置中的环境音分组 -->
+    <string name="settings_ambient">环境音</string>
+    <string name="settings_ambient_subtitle">训练期间循环播放，选中的音源会随设置立即生效</string>
+
+    <!-- 设置中的播报方式分组 -->
+    <string name="settings_voice_style">播报方式</string>
+    <string name="settings_voice_style_subtitle">温柔女声以单词或长句引导呼吸，可随时切换</string>
+    <string name="voice_style_short_name">单词</string>
+    <string name="voice_style_short_desc">"吸气 / 屏息 / 呼气 / 停顿"，节奏更紧凑。</string>
+    <string name="voice_style_long_name">温柔长句（推荐）</string>
+    <string name="voice_style_long_desc">"慢慢地吸气，让气息充满腹部"等整句引导，更放松。</string>
+
+    <!-- 通用 -->
+    <string name="back">返回</string>
+    <string name="close">关闭</string>
+    <string name="about">关于</string>
+
+    <!-- Intro 卡片 -->
+    <string name="intro_title">呼吸节奏训练</string>
+    <string name="intro_body">由美国整合医学专家 Andrew Weil 提出的放松呼吸训练。\n\n4-7-8：吸气 4 秒 → 屏息 7 秒 → 呼气 8 秒\n4-2-6：吸气 4 秒 → 屏息 2 秒 → 呼气 6 秒\n盒式   ：四段相等，每段 4 秒\n\n建议每天练习 4–8 轮，可帮助缓解焦虑、辅助入睡。</string>
+
+    <!-- 计数与统计 -->
+    <string name="round_label">第 %1$d / %2$d 轮</string>
+    <string name="seconds_suffix">秒</string>
+
+    <!-- 提示 -->
+    <string name="tip_ready">点击开始，找一个舒适的姿势，轻轻闭上双眼</string>
+    <string name="tip_inhale">用鼻子缓慢吸气，让气息充满腹部</string>
+    <string name="tip_hold_inhale">轻轻屏住呼吸，让氧气充分交换</string>
+    <string name="tip_exhale">用嘴缓慢呼气，把压力一起带走</string>
+    <string name="tip_hold_exhale">保持停顿，让身心彻底放松</string>
+    <string name="tip_complete">训练完成，让身体保持放松片刻</string>
+
+    <!-- 通知 -->
+    <string name="notification_channel_name">呼吸训练</string>
+    <string name="notification_channel_description">训练期间用于前台播放音频</string>
+
+    <!-- 无障碍 -->
+    <string name="cd_settings">打开设置</string>
+    <string name="cd_back">返回</string>
+    <string name="cd_close">关闭</string>
+    <string name="cd_breath_indicator">呼吸指示器</string>
+    <string name="cd_play">开始</string>
+    <string name="cd_pause">暂停</string>
+    <string name="cd_resume">继续</string>
+</resources>
