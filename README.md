@@ -214,6 +214,78 @@ python tools/generate_assets.py
 
 > ⚠️ 温馨提示：本应用不替代专业医疗建议，如有严重呼吸系统疾病、心脏疾病或孕期，请先咨询医生。
 
+## 持续集成 / 自动发布（GitHub Actions）
+
+仓库内置两条工作流，无需额外配置即可使用：
+
+| 文件 | 名称 | 触发条件 | 作用 |
+|------|------|----------|------|
+| `.github/workflows/build.yml` | **build** | push 到 `main` / `master` / `develop`，以及任何 PR | 拉 JDK 17 + Android SDK 34，运行 `assembleDebug` 与 `lintDebug`，把 debug APK 上传为 artifact（保留 14 天） |
+| `.github/workflows/release.yml` | **release** | 推送形如 `v1.0.0` 的 tag，或在 Actions 页面手动触发 | 运行 `assembleRelease`，计算 SHA-256，附带 changelog 创建 GitHub Release（prerelease 自动检测 `-rc` 后缀） |
+
+### 1. CI（build）
+
+- 缓存策略：使用 `gradle/actions/setup-gradle@v4`，根据 Gradle 缓存键自动失效；在 PR 上使用只读缓存，避免污染主分支缓存。
+- 步骤：`./gradlew :app:assembleDebug` → 上传 `app-debug.apk` → 跑 `./gradlew :app:lintDebug`（不阻断）→ 上传 lint HTML 报告。
+- 在任意 PR 的评论里可以下载 APK 自行安装到设备测试。
+
+### 2. 自动发版（release）
+
+打 tag 即可触发一条龙：
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+workflow 会：
+
+1. 检出代码（含全部历史与 tags）；
+2. 安装 JDK 17 + Android SDK 34；
+3. 跑 `./gradlew :app:assembleRelease`（带 minify + shrink + 默认 debug 签名）；
+4. 计算 SHA-256；
+5. 生成基于 `git log` 的 changelog（自上一个 `v*` tag 起的 commit 列表）；
+6. 创建 GitHub Release，附加 `app-release.apk` 与 `.sha256` 文件。
+
+> ⚠️ 默认使用 Android SDK 自带的 debug keystore 签名。debug-signed APK 仍然可安装，但**不推荐作为正式分发**。正式发布时请配置真实 release keystore（见下一节）。
+
+### 3. 使用真实 release keystore（可选）
+
+在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中加入以下 Secrets：
+
+| Secret | 内容 |
+|--------|------|
+| `BREATH_TRAINER_KEYSTORE` | `.jks` 文件的 **base64** 编码（`base64 -i release.jks \| tr -d '\n'`） |
+| `BREATH_TRAINER_KEYSTORE_PASSWORD` | keystore 密码 |
+| `BREATH_TRAINER_KEY_ALIAS` | key 别名 |
+| `BREATH_TRAINER_KEY_PASSWORD` | key 密码 |
+
+下次推送 tag 时，workflow 会自动：
+
+1. 还原 `app/keystore/release.jks`；
+2. 把 4 个 properties 写入临时 `gradle.properties`；
+3. 调用 `./gradlew :app:assembleRelease -PbreathReleaseSigning=true`；
+4. `app/build.gradle.kts` 检测到 `-PbreathReleaseSigning=true` 与 keystore 文件后，使用 `signingConfigs.breathRelease` 完成正式签名。
+
+### 4. 手动触发
+
+两个工作流都开启了 `workflow_dispatch`。在 Actions 页面选 `release` → Run workflow，可填入 `tag_name`（例如 `v1.0.0-rc1`）做手动预发布；不填则仅构建并上传 artifact，不会创建 Release。
+
+### 5. 本地构建与 CI 等价
+
+`gradle.properties` 已经开启 `org.gradle.caching=true` 与 `org.gradle.parallel=true`，本地与 CI 共享同一份缓存键。常用命令：
+
+```bash
+# Debug（与 CI 一致）
+./gradlew :app:assembleDebug
+
+# Release（未配置 secrets 时使用 debug 签名）
+./gradlew :app:assembleRelease
+
+# 跑 lint
+./gradlew :app:lintDebug
+```
+
 ## License
 
 仅作为示例项目使用。
