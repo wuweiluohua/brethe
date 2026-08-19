@@ -25,10 +25,11 @@ jobs:
 
     env:
       # SDK 安装到 runner 临时目录，与每个 job 隔离；路径固定便于 cache 命中
-      ANDROID_HOME: ${{ RUNNER_TEMP }}/android-sdk
+      # ANDROID_HOME: ${{ RUNNER_TEMP }}/android-sdk
       ANDROID_API_LEVEL: '34'
       ANDROID_BUILD_TOOLS: '34.0.0'
       CMDLINE_TOOLS_VERSION: '11076708'
+      
 
     steps:
       - name: Checkout
@@ -36,6 +37,11 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Set Android SDK path
+        run: |
+          echo "ANDROID_HOME=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
