@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+local.properties
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+.kotlin/
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.aar
+*.dex
+output.json
+
+# OS
+.DS_Store
+Thumbs.db
