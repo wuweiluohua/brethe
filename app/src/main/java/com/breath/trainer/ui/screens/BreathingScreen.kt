@@ -48,6 +48,7 @@ import com.breath.trainer.breathing.BreathingEngine
 import com.breath.trainer.breathing.pattern.BreathingPattern
 import com.breath.trainer.breathing.pattern.BreathingPatterns
 import com.breath.trainer.breathing.pattern.BreathingStep
+import com.breath.trainer.breathing.pattern.toPhaseOrNull
 import com.breath.trainer.ui.TrainerViewModel
 import com.breath.trainer.ui.components.BreathOrb
 import com.breath.trainer.ui.components.SettingsSheet

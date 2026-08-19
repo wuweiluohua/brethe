@@ -75,6 +75,13 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // AGP 8.6 启用了新的 strip 工具链，androidx.datastore 自带的 .so
+        // (libdatastore_shared_counter.so) 用的是旧 ABI 标记，strip 工具无法识别
+        // 会报 "Unable to strip the following libraries, packaging them as they are"。
+        // 改用 legacy 打包方式，跳过 strip，保持与 Android 24+ 各 ABI 兼容。
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
@@ -103,7 +110,7 @@ dependencies {
 
     // Tests
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")

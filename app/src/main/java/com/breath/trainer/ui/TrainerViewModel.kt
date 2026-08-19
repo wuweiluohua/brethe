@@ -13,6 +13,7 @@ import com.breath.trainer.breathing.BreathingEngine
 import com.breath.trainer.breathing.pattern.BreathingPattern
 import com.breath.trainer.breathing.pattern.BreathingPatterns
 import com.breath.trainer.breathing.pattern.BreathingStep
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -28,6 +29,26 @@ data class TrainerUiSettings(
     val keepScreenOn: Boolean = true,
     val ambient: AmbientSound = AmbientSounds.CALM,
     val voiceStyle: VoiceStyle = VoiceStyle.GENTLE_LONG,
+)
+
+/** 4 个开关标志位：合并后避免和 audio / pattern 一起塞进同一个 8-flow combine。 */
+private data class TrainerFlags(
+    val sound: Boolean,
+    val music: Boolean,
+    val haptics: Boolean,
+    val keepScreenOn: Boolean,
+)
+
+/** 音频偏好：环境音 + 播报方式。 */
+private data class TrainerAudioPrefs(
+    val ambient: AmbientSound,
+    val voiceStyle: VoiceStyle,
+)
+
+/** 节奏 + 轮数：耦合在一起，轮数要 clamp 到 pattern.totalRounds。 */
+private data class TrainerPatternRounds(
+    val pattern: BreathingPattern,
+    val totalRounds: Int,
 )
 
 class TrainerViewModel(application: Application) : AndroidViewModel(application) {
@@ -97,27 +118,51 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
 
     val state: StateFlow<BreathingEngine.State> = engine.state
 
-    val uiSettings: StateFlow<TrainerUiSettings> = combine(
+    // Kotlin 2.0 / coroutines 1.9 起，8-flow combine 走的是 vararg 形式
+    // (suspend (Array<T>) -> R)，原代码 8 参 lambda 会被推断成 SuspendFunction8，
+    // 与目标 SuspendFunction1 不匹配；这里拆成 3 个 2/3/4-flow 子 combine 再合并，
+    // 既保留类型安全，又能让 K2 编译器正确推导。
+    private val patternRoundsFlow: Flow<TrainerPatternRounds> = combine(
         app.settingsRepository.patternId,
         app.settingsRepository.totalRounds,
+    ) { patternId, rounds ->
+        val pattern = BreathingPatterns.findById(patternId)
+        TrainerPatternRounds(pattern, rounds.coerceIn(1, pattern.totalRounds))
+    }
+
+    private val flagsFlow: Flow<TrainerFlags> = combine(
         app.settingsRepository.soundEnabled,
         app.settingsRepository.musicEnabled,
         app.settingsRepository.hapticsEnabled,
         app.settingsRepository.keepScreenOn,
+    ) { sound, music, haptics, keep ->
+        TrainerFlags(sound, music, haptics, keep)
+    }
+
+    private val audioPrefsFlow: Flow<TrainerAudioPrefs> = combine(
         app.settingsRepository.ambientId,
         app.settingsRepository.voiceStyleId,
-    ) { patternId, rounds, sound, music, haptics, keep, ambientId, voiceStyleId ->
-        val pattern = BreathingPatterns.findById(patternId)
-        val ambient = AmbientSounds.findById(ambientId)
-        TrainerUiSettings(
-            pattern = pattern,
-            totalRounds = rounds.coerceIn(1, pattern.totalRounds),
-            soundEnabled = sound,
-            musicEnabled = music,
-            hapticsEnabled = haptics,
-            keepScreenOn = keep,
-            ambient = ambient,
+    ) { ambientId, voiceStyleId ->
+        TrainerAudioPrefs(
+            ambient = AmbientSounds.findById(ambientId),
             voiceStyle = VoiceStyle.fromId(voiceStyleId),
+        )
+    }
+
+    val uiSettings: StateFlow<TrainerUiSettings> = combine(
+        patternRoundsFlow,
+        flagsFlow,
+        audioPrefsFlow,
+    ) { pr, flags, audio ->
+        TrainerUiSettings(
+            pattern = pr.pattern,
+            totalRounds = pr.totalRounds,
+            soundEnabled = flags.sound,
+            musicEnabled = flags.music,
+            hapticsEnabled = flags.haptics,
+            keepScreenOn = flags.keepScreenOn,
+            ambient = audio.ambient,
+            voiceStyle = audio.voiceStyle,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -199,7 +244,8 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         // 启动时把持久化的环境音同步到管理器
         viewModelScope.launch {
             uiSettings.collect { s ->
-                app.backgroundMusic.ambient = s.ambient
+                // BackgroundMusicManager.ambient 是 private set，必须走 setAmbient()
+                app.backgroundMusic.setAmbient(s.ambient)
             }
         }
     }

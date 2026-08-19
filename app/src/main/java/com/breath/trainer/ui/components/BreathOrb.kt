@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.breath.trainer.breathing.BreathingEngine
+import com.breath.trainer.breathing.pattern.toPhaseOrNull
 import com.breath.trainer.ui.theme.BreathTrainerTheme
 import com.breath.trainer.ui.theme.PhaseExhale
 import com.breath.trainer.ui.theme.PhaseHold
