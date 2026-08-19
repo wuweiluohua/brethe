@@ -1,7 +1,7 @@
-- name: Run lint
+ - name: Run lint
   run: ./gradlew :app:lintDebug --rerun-tasks --stacktrace
 
-- name: Upload lint report
+ - name: Upload lint report
   if: always()
   uses: actions/upload-artifact@v4
   with:
