@@ -227,7 +227,7 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
 
     fun setMusicEnabled(value: Boolean) = viewModelScope.launch {
         app.settingsRepository.setMusicEnabled(value)
-        app.backgroundMusic.setEnabled(value)
+        app.backgroundMusic.enabled = value
     }
 
     fun setHapticsEnabled(value: Boolean) = viewModelScope.launch {
@@ -242,7 +242,7 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     fun selectAmbient(ambient: AmbientSound) = viewModelScope.launch {
         app.settingsRepository.setAmbientId(ambient.id)
         if (uiSettings.value.musicEnabled) {
-            app.backgroundMusic.setAmbient(ambient)
+            app.backgroundMusic.ambient = ambient
         }
     }
 
@@ -258,8 +258,8 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         // 启动时把持久化的环境音同步到管理器
         viewModelScope.launch {
             uiSettings.collect { s ->
-                // BackgroundMusicManager.ambient 是 private set，必须走 setAmbient()
-                app.backgroundMusic.setAmbient(s.ambient)
+                // ambient 通过属性赋值切换（含热切换逻辑）
+                app.backgroundMusic.ambient = s.ambient
             }
         }
     }
