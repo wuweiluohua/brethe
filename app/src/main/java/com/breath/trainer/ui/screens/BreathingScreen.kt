@@ -11,13 +11,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -142,11 +142,11 @@ fun BreathingScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 中部呼吸区
+            // 中部呼吸区：占据剩余空间，随屏幕高度自适应，固定元素（标题/节奏/轮数/阶段/按钮/提示）始终完整显示
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.62f),
+                    .weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
                 BreathOrb(state = state)
@@ -224,6 +224,8 @@ fun BreathingScreen(
         onPatternChange = viewModel::selectPattern,
         onAmbientChange = viewModel::selectAmbient,
         onVoiceStyleChange = viewModel::selectVoiceStyle,
+        themeMode = uiSettings.themeMode,
+        onThemeModeChange = viewModel::setThemeMode,
         onDismiss = { settingsVisible = false },
     )
 }

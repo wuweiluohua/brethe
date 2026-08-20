@@ -29,14 +29,16 @@ data class TrainerUiSettings(
     val keepScreenOn: Boolean = true,
     val ambient: AmbientSound = AmbientSounds.CALM,
     val voiceStyle: VoiceStyle = VoiceStyle.GENTLE_LONG,
+    val themeMode: Int = 0,
 )
 
-/** 4 个开关标志位：合并后避免和 audio / pattern 一起塞进同一个 8-flow combine。 */
+/** 开关标志位 + 主题模式：合并后避免和 audio / pattern 一起塞进同一个 8-flow combine。 */
 private data class TrainerFlags(
     val sound: Boolean,
     val music: Boolean,
     val haptics: Boolean,
     val keepScreenOn: Boolean,
+    val themeMode: Int,
 )
 
 /** 音频偏好：环境音 + 播报方式。 */
@@ -135,8 +137,9 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         app.settingsRepository.musicEnabled,
         app.settingsRepository.hapticsEnabled,
         app.settingsRepository.keepScreenOn,
-    ) { sound, music, haptics, keep ->
-        TrainerFlags(sound, music, haptics, keep)
+        app.settingsRepository.themeMode,
+    ) { sound, music, haptics, keep, theme ->
+        TrainerFlags(sound, music, haptics, keep, theme)
     }
 
     private val audioPrefsFlow: Flow<TrainerAudioPrefs> = combine(
@@ -163,6 +166,7 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
             keepScreenOn = flags.keepScreenOn,
             ambient = audio.ambient,
             voiceStyle = audio.voiceStyle,
+            themeMode = flags.themeMode,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -181,12 +185,18 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
 
     /** 启动训练 */
     fun start() {
-        val settings = uiSettings.value
-        val pattern = settings.pattern
-        engine.setPattern(pattern)
-        engine.setTotalRounds(settings.totalRounds.coerceIn(1, pattern.totalRounds))
-        app.backgroundMusic.start()
-        engine.start()
+        try {
+            val settings = uiSettings.value
+            val pattern = settings.pattern
+            engine.setPattern(pattern)
+            engine.setTotalRounds(settings.totalRounds.coerceIn(1, pattern.totalRounds))
+            // MediaPlayer 初始化失败不能让整进程崩；只是该次训练没背景音而已
+            runCatching { app.backgroundMusic.start() }
+                .onFailure { Log.w("TrainerViewModel", "backgroundMusic.start failed", it) }
+            engine.start()
+        } catch (e: Throwable) {
+            Log.e("TrainerViewModel", "start() failed", e)
+        }
     }
 
     fun togglePause(): Boolean = engine.pauseToggle()
@@ -238,6 +248,10 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectVoiceStyle(style: VoiceStyle) = viewModelScope.launch {
         app.settingsRepository.setVoiceStyleId(style.id)
+    }
+
+    fun setThemeMode(value: Int) = viewModelScope.launch {
+        app.settingsRepository.setThemeMode(value)
     }
 
     init {

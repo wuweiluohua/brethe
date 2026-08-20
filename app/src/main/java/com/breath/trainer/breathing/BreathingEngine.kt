@@ -1,9 +1,11 @@
 package com.breath.trainer.breathing
 
+import android.util.Log
 import com.breath.trainer.audio.TtsManager
 import com.breath.trainer.breathing.pattern.BreathingPattern
 import com.breath.trainer.breathing.pattern.BreathingPatterns
 import com.breath.trainer.breathing.pattern.BreathingStep
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -61,7 +63,15 @@ class BreathingEngine(
             get() = ((pattern.maxStepSeconds - (pattern.maxStepSeconds * progress)).toInt().coerceAtLeast(0) + 1)
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default +
+            CoroutineExceptionHandler { _, e ->
+                // 兜底：onPhaseStart / onTick 等用户回调里如果抛异常，
+                // 不要让进程直接闪退；记日志后让训练自然停止。
+                Log.e("BreathingEngine", "Engine coroutine crashed, stopping training", e)
+                _state.update { it.copy(running = false, paused = false) }
+            }
+    )
     private var job: Job? = null
 
     private val _state = MutableStateFlow(
@@ -152,40 +162,81 @@ class BreathingEngine(
     }
 
     private suspend fun runTraining() {
-        // 准备阶段 3s（不触发普通 step 回调，仅用 onTrainAboutToStart 风格通知）
-        _state.update { it.copy(phase = Phase.READY, progress = 0f) }
-        onPhaseStart?.invoke(BreathingStep.StepKind.INHALE, _state.value.round) // 视作热身播报
-        if (!awaitTick(Phase.READY, Phase.READY.secondsDefault)) return
+        try {
+            // 准备阶段 3s（不触发普通 step 回调，仅用 onTrainAboutToStart 风格通知）
+            _state.update { it.copy(phase = Phase.READY, progress = 0f) }
+            safeInvokeOnPhaseStart(BreathingStep.StepKind.INHALE, _state.value.round) // 视作热身播报
+            if (!awaitTick(Phase.READY, Phase.READY.secondsDefault)) return
 
-        while (true) {
-            val stateNow = _state.value
-            if (!stateNow.running) return
-            val currentRound = stateNow.round
-            if (currentRound > stateNow.totalRounds) break
+            while (true) {
+                val stateNow = _state.value
+                if (!stateNow.running) return
+                val currentRound = stateNow.round
+                if (currentRound > stateNow.totalRounds) break
 
-            onRoundChanged?.invoke(currentRound)
+                safeInvokeOnRoundChanged(currentRound)
 
-            // 顺序执行节奏中的每一步
-            for ((index, step) in currentPattern.steps.withIndex()) {
-                val phase = step.kind.toPhase()
-                _state.update { it.copy(phase = phase, progress = 0f) }
-                onPhaseStart?.invoke(step.kind, currentRound)
-                if (!awaitTick(phase, step.seconds)) return
+                // 顺序执行节奏中的每一步
+                for ((index, step) in currentPattern.steps.withIndex()) {
+                    val phase = step.kind.toPhase()
+                    _state.update { it.copy(phase = phase, progress = 0f) }
+                    safeInvokeOnPhaseStart(step.kind, currentRound)
+                    if (!awaitTick(phase, step.seconds)) return
 
-                if (_state.value.round > _state.value.totalRounds) return
-                if (index == currentPattern.steps.lastIndex) {
-                    val nextRound = currentRound + 1
-                    if (nextRound > currentPattern.totalRounds) break
-                    _state.update { it.copy(round = nextRound) }
+                    if (_state.value.round > _state.value.totalRounds) return
+                    if (index == currentPattern.steps.lastIndex) {
+                        val nextRound = currentRound + 1
+                        if (nextRound > currentPattern.totalRounds) break
+                        _state.update { it.copy(round = nextRound) }
+                    }
                 }
+                if (_state.value.round > _state.value.totalRounds) break
             }
-            if (_state.value.round > _state.value.totalRounds) break
-        }
 
-        _state.update {
-            it.copy(phase = Phase.COMPLETE, progress = 1f, running = false, paused = false)
+            _state.update {
+                it.copy(phase = Phase.COMPLETE, progress = 1f, running = false, paused = false)
+            }
+            safeInvokeOnTrainFinished()
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            // stop() 会取消 job，把 CancellationException 透传上去
+            throw ce
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "runTraining failed", e)
+            _state.update { it.copy(running = false, paused = false, phase = Phase.READY) }
         }
-        onTrainFinished?.invoke()
+    }
+
+    /** 用户在 ViewModel 里挂的回调里若抛异常，会把整个协程拖死；这里统一包一层。 */
+    private inline fun safeInvokeOnPhaseStart(kind: BreathingStep.StepKind, round: Int) {
+        try {
+            onPhaseStart?.invoke(kind, round)
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "onPhaseStart callback threw", e)
+        }
+    }
+
+    private inline fun safeInvokeOnRoundChanged(round: Int) {
+        try {
+            onRoundChanged?.invoke(round)
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "onRoundChanged callback threw", e)
+        }
+    }
+
+    private inline fun safeInvokeOnTrainFinished() {
+        try {
+            onTrainFinished?.invoke()
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "onTrainFinished callback threw", e)
+        }
+    }
+
+    private inline fun safeInvokeOnTick(phase: Phase, progress: Float) {
+        try {
+            onTick?.invoke(phase, progress)
+        } catch (_: Throwable) {
+            // tick 是高频调用，吞掉异常只记一行调试
+        }
     }
 
     private fun BreathingStep.StepKind.toPhase(): Phase = when (this) {
@@ -213,7 +264,7 @@ class BreathingEngine(
             step++
             val progress = (step.toFloat() / totalSteps).coerceIn(0f, 1f)
             _state.update { it.copy(phase = phase, progress = progress) }
-            onTick?.invoke(phase, progress)
+            safeInvokeOnTick(phase, progress)
             if (step >= totalSteps) return true
             delay(TICK_MS)
         }

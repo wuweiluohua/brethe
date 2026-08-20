@@ -61,17 +61,24 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun BreathTrainerTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    /** 0=跟随系统 1=浅色 2=深色。 */
+    themeMode: Int = 0,
     /** 是否启用 Android 12+ 动态色（Material You），默认关闭以保持品牌一致。 */
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    val useDarkTheme = when (themeMode) {
+        1 -> false
+        2 -> true
+        else -> isSystemInDarkTheme()
+    }
+
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            if (useDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
+        useDarkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
 
@@ -80,7 +87,7 @@ fun BreathTrainerTheme(
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !useDarkTheme
         }
     }
 

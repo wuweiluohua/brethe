@@ -8,7 +8,7 @@ import com.breath.trainer.R
  *
  * - [id] 持久化到 DataStore（默认 `calm`）。
  * - [nameRes] / [descriptionRes] 用于设置 UI 展示。
- * - [rawResId] 指向 res/raw 下的 WAV 文件。
+ * - [rawResId] 指向 res/raw 下的音频文件（MP3/WAV，由 Pixabay 录制素材或程序合成）。
  */
 data class AmbientSound(
     val id: String,
@@ -45,11 +45,25 @@ object AmbientSounds {
         descriptionRes = R.string.ambient_birds_desc,
     )
 
+    val BIRDS_LONG = AmbientSound(
+        id = "birds_long",
+        rawResId = R.raw.ambient_birds_long,
+        nameRes = R.string.ambient_birds_long_name,
+        descriptionRes = R.string.ambient_birds_long_desc,
+    )
+
     val OCEAN = AmbientSound(
         id = "ocean",
         rawResId = R.raw.ambient_ocean,
         nameRes = R.string.ambient_ocean_name,
         descriptionRes = R.string.ambient_ocean_desc,
+    )
+
+    val OCEAN_LONG = AmbientSound(
+        id = "ocean_long",
+        rawResId = R.raw.ambient_ocean_long,
+        nameRes = R.string.ambient_ocean_long_name,
+        descriptionRes = R.string.ambient_ocean_long_desc,
     )
 
     val STREAM = AmbientSound(
@@ -66,7 +80,9 @@ object AmbientSounds {
         descriptionRes = R.string.ambient_campfire_desc,
     )
 
-    val ALL: List<AmbientSound> = listOf(CALM, RAIN, BIRDS, OCEAN, STREAM, CAMPFIRE)
+    val ALL: List<AmbientSound> = listOf(
+        CALM, RAIN, BIRDS, BIRDS_LONG, OCEAN, OCEAN_LONG, STREAM, CAMPFIRE,
+    )
 
     fun findById(id: String?): AmbientSound =
         ALL.firstOrNull { it.id == id } ?: CALM

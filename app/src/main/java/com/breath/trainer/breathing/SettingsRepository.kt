@@ -28,6 +28,7 @@ class SettingsRepository(private val appContext: Context) {
         val PatternId = stringPreferencesKey("pattern_id")
         val AmbientId = stringPreferencesKey("ambient_id")
         val VoiceStyleId = stringPreferencesKey("voice_style_id")
+        val ThemeMode = intPreferencesKey("theme_mode")
     }
 
     val totalRounds: Flow<Int> = appContext.dataStore.data.map {
@@ -62,6 +63,11 @@ class SettingsRepository(private val appContext: Context) {
         it[Keys.VoiceStyleId] ?: VoiceStyle.GENTLE_LONG.id
     }
 
+    /** 0=跟随系统 1=浅色 2=深色。 */
+    val themeMode: Flow<Int> = appContext.dataStore.data.map {
+        it[Keys.ThemeMode] ?: 0
+    }
+
     suspend fun setTotalRounds(value: Int) = appContext.dataStore.edit {
         it[Keys.TotalRounds] = value.coerceIn(1, 12)
     }
@@ -92,5 +98,9 @@ class SettingsRepository(private val appContext: Context) {
 
     suspend fun setVoiceStyleId(value: String) = appContext.dataStore.edit {
         it[Keys.VoiceStyleId] = value
+    }
+
+    suspend fun setThemeMode(value: Int) = appContext.dataStore.edit {
+        it[Keys.ThemeMode] = value.coerceIn(0, 2)
     }
 }

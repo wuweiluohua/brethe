@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -51,6 +53,8 @@ fun SettingsSheet(
     onPatternChange: (BreathingPattern) -> Unit,
     onAmbientChange: (AmbientSound) -> Unit,
     onVoiceStyleChange: (VoiceStyle) -> Unit,
+    themeMode: Int = 0,
+    onThemeModeChange: (Int) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     if (!visible) return
@@ -66,6 +70,7 @@ fun SettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 12.dp),
         ) {
             Text(
@@ -250,6 +255,28 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // 外观（Material 3 自定义主题的深色模式）
+            Text(
+                text = stringResource(id = R.string.settings_appearance),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(id = R.string.settings_appearance_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            ThemeModeSegmented(
+                selected = themeMode,
+                onSelect = onThemeModeChange,
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             ToggleRow(
                 title = stringResource(id = R.string.settings_sound),
                 checked = settings.soundEnabled,
@@ -369,6 +396,51 @@ private fun VoiceStyleSegmented(
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 三态外观切换：跟随系统 / 浅色 / 深色。
+ * 选中态使用主色填充，与播报方式分段控件风格一致。
+ */
+@Composable
+private fun ThemeModeSegmented(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val items = listOf(
+        0 to R.string.theme_mode_system,
+        1 to R.string.theme_mode_light,
+        2 to R.string.theme_mode_dark,
+    )
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(50),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items.forEach { (mode, nameRes) ->
+                val isSelected = mode == selected
+                androidx.compose.material3.Surface(
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0f),
+                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelect(mode) },
+                ) {
+                    Text(
+                        text = stringResource(id = nameRes),
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
                 }
             }
         }

@@ -23,57 +23,45 @@ class BackgroundMusicManager(private val appContext: Context) {
 
     /** 是否启用循环播放。 */
     @Volatile
-    private var enabled: Boolean = true
+    var enabled: Boolean = true
 
     /** 当前激活的环境音。 */
     @Volatile
-    private var ambient: AmbientSound = AmbientSounds.CALM
+    var ambient: AmbientSound = AmbientSounds.CALM
+        private set
 
-    /** 音量 0..1。 */
+    /** 音量 0..1。默认调低，避免盖过温柔女声 / 提示音（提示音约 0.4–0.65）。 */
     @Volatile
-    private var volume: Float = 0.45f
-
-
-    fun isEnabled(): Boolean = enabled
-
-    fun getAmbient(): AmbientSound = ambient
-
-    fun getVolume(): Float = volume
-
+    var volume: Float = 0.2f
 
     fun start() {
         if (!enabled) return
-        if (player != null && player?.isPlaying == true) return
-
+        // 已有 player 且正在播放：no-op；如果处于准备中（isPlaying==false），
+        // 也要 stop 释放旧实例，否则连续点击 / 切音源会泄漏 file descriptor 直到闪退。
+        if (player?.isPlaying == true) return
+        // 先把可能还活着的旧 player 释放干净
+        stop()
         try {
             val mp = MediaPlayer()
             applyAudioAttributes(mp)
-
             mp.setOnPreparedListener { p ->
                 p.isLooping = true
                 p.setVolume(volume, volume)
                 p.start()
                 Log.i(tag, "Background music started: ${ambient.id}")
             }
-
             mp.setOnErrorListener { _, what, extra ->
-                Log.e(
-                    tag,
-                    "MediaPlayer error what=$what extra=$extra (ambient=${ambient.id})"
-                )
+                Log.e(tag, "MediaPlayer error what=$what extra=$extra (ambient=${ambient.id})")
                 stop()
                 true
             }
-
             openResource(mp, ambient.rawResId)
             player = mp
-
         } catch (e: Exception) {
             Log.e(tag, "start failed: ${e.message}")
             stop()
         }
     }
-
 
     private fun applyAudioAttributes(mp: MediaPlayer) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -89,19 +77,11 @@ class BackgroundMusicManager(private val appContext: Context) {
         }
     }
 
-
     private fun openResource(mp: MediaPlayer, resId: Int) {
-        val afd: AssetFileDescriptor =
-            appContext.resources.openRawResourceFd(resId)
-
+        val afd: AssetFileDescriptor = appContext.resources.openRawResourceFd(resId)
         try {
-            mp.setDataSource(
-                afd.fileDescriptor,
-                afd.startOffset,
-                afd.length
-            )
+            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
             mp.prepareAsync()
-
         } finally {
             try {
                 afd.close()
@@ -111,71 +91,50 @@ class BackgroundMusicManager(private val appContext: Context) {
         }
     }
 
-
     fun setEnabled(value: Boolean) {
         enabled = value
-
         if (!value) {
             stop()
-        } else {
-            start()
         }
+        // 启用时不在后台自动播放；环境音仅在训练开始(start)时由 ViewModel 启动。
     }
 
-
+    /**
+     * 切换环境音。仅在正在播放（训练进行中）时才热切换音源；
+     * 未播放时不要自动开始，避免一进入程序就响起环境音。
+     */
     fun setAmbient(value: AmbientSound) {
         val same = value.id == ambient.id
-
         ambient = value
-
         if (!enabled) return
-
-        if (same && player?.isPlaying == true) {
-            return
+        if (!same && player?.isPlaying == true) {
+            restartInternal()
         }
-
-        restartInternal()
     }
-
 
     private fun restartInternal() {
         val wasPlaying = player?.isPlaying == true
-
         stop()
-
-        if (wasPlaying || enabled) {
-            start()
-        }
+        if (wasPlaying || enabled) start()
     }
-
 
     fun setVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
         player?.setVolume(volume, volume)
     }
 
-
     fun pause() {
-        runCatching {
-            player?.pause()
-        }.onFailure {
-            Log.w(tag, "pause failed: ${it.message}")
-        }
+        runCatching { player?.pause() }.onFailure { Log.w(tag, "pause failed: ${it.message}") }
     }
-
 
     fun stop() {
         try {
             player?.let {
-                if (it.isPlaying) {
-                    it.stop()
-                }
+                if (it.isPlaying) it.stop()
                 it.release()
             }
-
         } catch (e: Exception) {
             Log.w(tag, "stop failed: ${e.message}")
-
         } finally {
             player = null
         }
