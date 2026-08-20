@@ -225,7 +225,8 @@ python tools/generate_assets.py
 
 ### 1. CI（build）
 
-- 缓存策略：使用 `gradle/actions/setup-gradle@v4`，根据 Gradle 缓存键自动失效；在 PR 上使用只读缓存，避免污染主分支缓存。
+- 缓存策略：使用 `gradle/actions/setup-gradle@v4`（按 hash 自动失效 Gradle 缓存）；Android SDK 通过 `actions/cache@v4` 单独缓存，key 包含 `platforms;android-34`、`build-tools;34.0.0` 与构建脚本 hash，PR 上只读。
+- 安装流程（缓存未命中时执行）：下载 `commandlinetools-linux-11076708_latest.zip` → 解压到 `$ANDROID_HOME/cmdline-tools/latest/` → `sdkmanager --licenses` → 安装 `platform-tools` / `platforms;android-34` / `build-tools;34.0.0`。
 - 步骤：`./gradlew :app:assembleDebug` → 上传 `app-debug.apk` → 跑 `./gradlew :app:lintDebug`（不阻断）→ 上传 lint HTML 报告。
 - 在任意 PR 的评论里可以下载 APK 自行安装到设备测试。
 
