@@ -1,0 +1,286 @@
+package com.breath.trainer.breathing
+
+import android.util.Log
+import com.breath.trainer.audio.TtsManager
+import com.breath.trainer.breathing.pattern.BreathingPattern
+import com.breath.trainer.breathing.pattern.BreathingPatterns
+import com.breath.trainer.breathing.pattern.BreathingStep
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+/**
+ * 多节奏呼吸训练引擎。
+ *
+ * 通过 [BreathingPattern] 抽象一种呼吸节奏的具体步骤。引擎按顺序逐个执行
+ * 每个 step，并在每一步内按 [TICK_MS] 推进当前进度 (0..1)。
+ *
+ * 支持的 step:
+ *  - [BreathingStep.StepKind.INHALE]
+ *  - [BreathingStep.StepKind.HOLD_AFTER_INHALE]
+ *  - [BreathingStep.StepKind.EXHALE]
+ *  - [BreathingStep.StepKind.HOLD_AFTER_EXHALE]
+ *
+ * 引擎不直接依赖 Android 资源，便于复用与测试。
+ */
+class BreathingEngine(
+    @Suppress("unused") private val ttsManager: TtsManager? = null,
+) {
+    enum class Phase(val secondsDefault: Int = 0) {
+        READY(secondsDefault = 3),
+        INHALE,
+        HOLD_AFTER_INHALE,
+        EXHALE,
+        HOLD_AFTER_EXHALE,
+        COMPLETE,
+    }
+
+    data class State(
+        val phase: Phase,
+        /** 当前阶段归一化进度 (0..1)。 */
+        val progress: Float = 0f,
+        /** 当前轮（从 1 开始）。 */
+        val round: Int = 1,
+        /** 总轮数。 */
+        val totalRounds: Int = 4,
+        /** 当前节奏。 */
+        val pattern: BreathingPattern = BreathingPatterns.FOUR_SEVEN_EIGHT,
+        val running: Boolean = false,
+        val paused: Boolean = false,
+    ) {
+        /** 当前阶段剩余秒数（向上取整）。 */
+        val remainingSeconds: Int
+            get() = ((pattern.maxStepSeconds - (pattern.maxStepSeconds * progress)).toInt().coerceAtLeast(0) + 1)
+    }
+
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default +
+            CoroutineExceptionHandler { _, e ->
+                // 兜底：onPhaseStart / onTick 等用户回调里如果抛异常，
+                // 不要让进程直接闪退；记日志后让训练自然停止。
+                Log.e("BreathingEngine", "Engine coroutine crashed, stopping training", e)
+                _state.update { it.copy(running = false, paused = false) }
+            }
+    )
+    private var job: Job? = null
+
+    private val _state = MutableStateFlow(
+        State(
+            phase = Phase.READY,
+            totalRounds = BreathingPatterns.FOUR_SEVEN_EIGHT.totalRounds,
+            pattern = BreathingPatterns.FOUR_SEVEN_EIGHT,
+        )
+    )
+    val state: StateFlow<State> = _state.asStateFlow()
+
+    /** 当前选中的呼吸节奏。 */
+    private var currentPattern: BreathingPattern = BreathingPatterns.FOUR_SEVEN_EIGHT
+
+    /** 配置变更的回调（让 UI / ViewModel 触发语音与震动）。 */
+    var onPhaseStart: ((BreathingStep.StepKind, Int) -> Unit)? = null
+    var onRoundChanged: ((Int) -> Unit)? = null
+    var onTrainFinished: (() -> Unit)? = null
+    var onTick: ((Phase, Float) -> Unit)? = null
+
+    /** 切换呼吸节奏。允许在 idle 状态替换，或在训练中即时热替换。 */
+    fun setPattern(pattern: BreathingPattern) {
+        currentPattern = pattern
+        val safeRounds = _state.value.totalRounds.coerceIn(1, pattern.totalRounds)
+        _state.update {
+            it.copy(
+                pattern = pattern,
+                totalRounds = if (it.running) safeRounds else pattern.totalRounds,
+                round = it.round.coerceIn(1, safeRounds),
+            )
+        }
+    }
+
+    /** 单轮覆盖默认轮数（仅在 idle 状态生效）。 */
+    fun setTotalRounds(rounds: Int) {
+        _state.update {
+            val safe = rounds.coerceIn(1, currentPattern.totalRounds)
+            it.copy(totalRounds = safe, round = it.round.coerceAtMost(safe).coerceAtLeast(1))
+        }
+    }
+
+    fun start(initialRound: Int = 1) {
+        if (_state.value.running) return
+        _state.update {
+            it.copy(
+                phase = Phase.READY,
+                progress = 0f,
+                running = true,
+                paused = false,
+                round = initialRound.coerceIn(1, it.totalRounds),
+                totalRounds = it.totalRounds.coerceIn(1, currentPattern.totalRounds),
+                pattern = currentPattern,
+            )
+        }
+        job = scope.launch {
+            runTraining()
+        }
+    }
+
+    fun pauseToggle(): Boolean {
+        val s = _state.value
+        if (!s.running) return false
+        val nowPaused = !s.paused
+        _state.update { it.copy(paused = nowPaused) }
+        if (nowPaused) {
+            ttsManager?.pause()
+        }
+        return nowPaused
+    }
+
+    fun stop() {
+        job?.cancel()
+        job = null
+        ttsManager?.pause()
+        _state.update {
+            it.copy(
+                phase = Phase.READY,
+                progress = 0f,
+                running = false,
+                paused = false,
+            )
+        }
+    }
+
+    fun release() {
+        stop()
+        scope.cancel()
+    }
+
+    private suspend fun runTraining() {
+        try {
+            // 准备阶段 3s（不触发普通 step 回调，仅用 onTrainAboutToStart 风格通知）
+            _state.update { it.copy(phase = Phase.READY, progress = 0f) }
+            safeInvokeOnPhaseStart(BreathingStep.StepKind.INHALE, _state.value.round) // 视作热身播报
+            if (!awaitTick(Phase.READY, Phase.READY.secondsDefault)) return
+
+            while (true) {
+                val stateNow = _state.value
+                if (!stateNow.running) return
+                val currentRound = stateNow.round
+                if (currentRound > stateNow.totalRounds) break
+
+                safeInvokeOnRoundChanged(currentRound)
+
+                // 顺序执行节奏中的每一步
+                for ((index, step) in currentPattern.steps.withIndex()) {
+                    val phase = step.kind.toPhase()
+                    _state.update { it.copy(phase = phase, progress = 0f) }
+                    safeInvokeOnPhaseStart(step.kind, currentRound)
+                    if (!awaitTick(phase, step.seconds)) return
+
+                    if (_state.value.round > _state.value.totalRounds) return
+                    if (index == currentPattern.steps.lastIndex) {
+                        val nextRound = currentRound + 1
+                        if (nextRound > currentPattern.totalRounds) break
+                        _state.update { it.copy(round = nextRound) }
+                    }
+                }
+                if (_state.value.round > _state.value.totalRounds) break
+            }
+
+            _state.update {
+                it.copy(phase = Phase.COMPLETE, progress = 1f, running = false, paused = false)
+            }
+            safeInvokeOnTrainFinished()
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            // stop() 会取消 job，把 CancellationException 透传上去
+            throw ce
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "runTraining failed", e)
+            _state.update { it.copy(running = false, paused = false, phase = Phase.READY) }
+        }
+    }
+
+    /** 用户在 ViewModel 里挂的回调里若抛异常，会把整个协程拖死；这里统一包一层。 */
+    private inline fun safeInvokeOnPhaseStart(kind: BreathingStep.StepKind, round: Int) {
+        try {
+            onPhaseStart?.invoke(kind, round)
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "onPhaseStart callback threw", e)
+        }
+    }
+
+    private inline fun safeInvokeOnRoundChanged(round: Int) {
+        try {
+            onRoundChanged?.invoke(round)
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "onRoundChanged callback threw", e)
+        }
+    }
+
+    private inline fun safeInvokeOnTrainFinished() {
+        try {
+            onTrainFinished?.invoke()
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "onTrainFinished callback threw", e)
+        }
+    }
+
+    private inline fun safeInvokeOnTick(phase: Phase, progress: Float) {
+        try {
+            onTick?.invoke(phase, progress)
+        } catch (_: Throwable) {
+            // tick 是高频调用，吞掉异常只记一行调试
+        }
+    }
+
+    private fun BreathingStep.StepKind.toPhase(): Phase = when (this) {
+        BreathingStep.StepKind.INHALE -> Phase.INHALE
+        BreathingStep.StepKind.HOLD_AFTER_INHALE -> Phase.HOLD_AFTER_INHALE
+        BreathingStep.StepKind.EXHALE -> Phase.EXHALE
+        BreathingStep.StepKind.HOLD_AFTER_EXHALE -> Phase.HOLD_AFTER_EXHALE
+    }
+
+    /** 在该阶段内推进进度；返回 true 表示完成，false 表示被取消或结束。 */
+    private suspend fun awaitTick(
+        phase: Phase,
+        seconds: Int,
+    ): Boolean {
+        if (seconds <= 0) return true
+        val totalSteps = (seconds * 1000) / TICK_MS
+        var step = 0
+        while (scope.isActive) {
+            val s = _state.value
+            if (!s.running) return false
+            if (s.paused) {
+                delay(50)
+                continue
+            }
+            step++
+            val progress = (step.toFloat() / totalSteps).coerceIn(0f, 1f)
+            _state.update { it.copy(phase = phase, progress = progress) }
+            safeInvokeOnTick(phase, progress)
+            if (step >= totalSteps) return true
+            delay(TICK_MS)
+        }
+        return false
+    }
+
+    private inline fun updatePhase(
+        phase: Phase,
+        seconds: Int,
+        crossinline block: (Phase, Int) -> Unit,
+    ) {
+        _state.update { it.copy(phase = phase, progress = 0f) }
+        block(phase, seconds)
+    }
+
+    companion object {
+        const val TICK_MS = 50L
+    }
+}
