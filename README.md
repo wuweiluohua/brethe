@@ -47,7 +47,6 @@ BreathTrainer/
 │       │   │   └── BackgroundMusicManager.kt 多音源 MediaPlayer 热切换
 │       │   ├── breathing/
 │       │   │   ├── BreathingEngine.kt      StateFlow 驱动的多节奏阶段机
-│       │   │   ├── HapticsController.kt    Vibrator 封装
 │       │   │   ├── SettingsRepository.kt   DataStore 偏好（含 patternId）
 │       │   │   └── pattern/                节奏抽象层
 │       │   │       ├── BreathingPattern.kt     BreathingStep + 扩展
