@@ -31,12 +31,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
-            BreathTrainerTheme {
+            val settings by viewModel.uiSettings.collectAsStateWithLifecycle()
+            BreathTrainerTheme(themeMode = settings.themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    val settings by viewModel.uiSettings.collectAsStateWithLifecycle()
                     val state by viewModel.state.collectAsStateWithLifecycle()
 
                     LaunchedEffect(settings.keepScreenOn) {
