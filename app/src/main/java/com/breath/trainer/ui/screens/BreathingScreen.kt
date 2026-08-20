@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
@@ -56,6 +58,9 @@ import com.breath.trainer.ui.theme.BreathTrainerTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+
+/** 与 SettingsSheet / BreathingEngine 保持一致。 */
+private const val MAX_ROUNDS: Int = 12
 
 /**
  * Phase -> 显示文案资源 ID。
@@ -114,12 +119,14 @@ fun BreathingScreen(
                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f),
                     ),
                 ),
-            ),
+            )
+            .statusBarsPadding()
+            .navigationBarsPadding(),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 20.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {
             HeaderRow(onSettingsClick = { settingsVisible = true })
 
@@ -135,21 +142,27 @@ fun BreathingScreen(
 
             RoundIndicator(
                 round = state.round,
-                totalRounds = uiSettings.totalRounds.coerceAtMost(uiSettings.pattern.totalRounds),
+                totalRounds = uiSettings.totalRounds.coerceAtMost(MAX_ROUNDS),
                 paused = state.paused,
                 running = state.running,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 中部呼吸区：固定占据约 45% 屏幕高度，随屏幕高度自适应
+            // 中部呼吸区：用 fillMaxHeight(0.45f) 占据约一半屏高（不使用 weight，避免缺少对应 import 时 CI 编译失败）；
+            // BreathOrb 内部已按 Canvas 短边 clamp 半径与光环，因此不会压到上方 RoundIndicator 或下方 PhaseTrack，也不会伸出屏外。
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.45f),
                 contentAlignment = Alignment.Center,
             ) {
-                BreathOrb(state = state)
+                BreathOrb(
+                    state = state,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
 
                 // 阶段文字覆盖在中央
                 Column(
@@ -173,7 +186,7 @@ fun BreathingScreen(
                             ?.seconds ?: 0
                         Text(
                             text = if (state.paused) "已暂停"
-                            else "${currentStepSeconds} 秒 · 第 ${state.round}/${uiSettings.totalRounds.coerceAtMost(uiSettings.pattern.totalRounds)} 轮",
+                            else "${currentStepSeconds} 秒 · 第 ${state.round}/${uiSettings.totalRounds.coerceAtMost(MAX_ROUNDS)} 轮",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -181,11 +194,9 @@ fun BreathingScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             PhaseTrack(phase = state.phase, pattern = state.pattern)
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 操作按钮区
             ActionRow(
@@ -196,8 +207,6 @@ fun BreathingScreen(
                 onTogglePause = viewModel::togglePause,
                 onStop = viewModel::stop,
             )
-
-            Spacer(modifier = Modifier.height(6.dp))
 
             val tipRes = when (state.phase) {
                 BreathingEngine.Phase.READY -> R.string.tip_ready
@@ -219,7 +228,6 @@ fun BreathingScreen(
         onRoundsChange = viewModel::setTotalRounds,
         onSoundChange = viewModel::setSoundEnabled,
         onMusicChange = viewModel::setMusicEnabled,
-        onHapticsChange = viewModel::setHapticsEnabled,
         onKeepScreenOnChange = viewModel::setKeepScreenOn,
         onPatternChange = viewModel::selectPattern,
         onAmbientChange = viewModel::selectAmbient,
@@ -336,10 +344,12 @@ private fun PhaseTrack(phase: BreathingEngine.Phase, pattern: BreathingPattern) 
     val currentKind = pattern.steps.firstOrNull { it.kind.toPhaseOrNull() == phase }?.kind
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         pattern.steps.forEach { step ->
             val active = currentKind == step.kind
+            // 不使用 weight，避免缺少对应 import 时 CI 编译失败；
+            // 每段按内容宽度自适应，并由 SpaceEvenly 均匀分布在整行，互不重叠。
             Surface(
                 color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -347,9 +357,7 @@ private fun PhaseTrack(phase: BreathingEngine.Phase, pattern: BreathingPattern) 
             ) {
                 Text(
                     text = stringResource(id = step.kind.labelStringRes()),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 8.dp),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     fontWeight = FontWeight.Medium,
                 )
@@ -394,10 +402,12 @@ private fun ActionRow(
                     .width(56.dp),
                 shape = CircleShape,
             ) {
+                // 结束按钮中央的方块放大 2 倍（默认 24dp → 48dp），与开始按钮的图标视觉权重更平衡。
                 Icon(
                     imageVector = Icons.Outlined.Stop,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(48.dp),
                 )
             }
         } else {
@@ -428,6 +438,7 @@ private fun ActionRow(
                     imageVector = Icons.Outlined.Stop,
                     contentDescription = stringResource(id = R.string.stop_training),
                     tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(48.dp),
                 )
             }
         }

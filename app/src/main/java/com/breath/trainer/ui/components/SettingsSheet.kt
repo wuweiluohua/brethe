@@ -35,7 +35,7 @@ import com.breath.trainer.breathing.pattern.BreathingPatterns
 import com.breath.trainer.ui.TrainerUiSettings
 
 /**
- * 设置底部抽屉：呼吸节奏、环境音、循环轮数、播报方式、声音、背景音乐、触感反馈、保持屏幕常亮。
+ * 设置底部抽屉：呼吸节奏、环境音、循环轮数、播报方式、声音、背景音乐、保持屏幕常亮。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -48,7 +48,6 @@ fun SettingsSheet(
     onRoundsChange: (Int) -> Unit,
     onSoundChange: (Boolean) -> Unit,
     onMusicChange: (Boolean) -> Unit,
-    onHapticsChange: (Boolean) -> Unit,
     onKeepScreenOnChange: (Boolean) -> Unit,
     onPatternChange: (BreathingPattern) -> Unit,
     onAmbientChange: (AmbientSound) -> Unit,
@@ -219,8 +218,10 @@ fun SettingsSheet(
                 Slider(
                     value = settings.totalRounds.toFloat(),
                     onValueChange = { onRoundsChange(it.toInt()) },
-                    valueRange = 1f..settings.pattern.totalRounds.toFloat().coerceAtLeast(1f),
-                    steps = (settings.pattern.totalRounds - 1).coerceAtLeast(0),
+                    // 滑块上限由"当前节奏的 totalRounds"放宽为统一的 MAX_ROUNDS，
+                    // 不再被 4/6/5 这些节奏内嵌值锁死。
+                    valueRange = 1f..MAX_ROUNDS.toFloat(),
+                    steps = (MAX_ROUNDS - 1).coerceAtLeast(0),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
@@ -247,7 +248,8 @@ fun SettingsSheet(
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            VoiceStyleSegmented(
+            // 改用卡片列表风格，与"环境音"分组保持一致：每条带 RadioButton + 名称 + 描述。
+            VoiceStyleCardList(
                 styles = voiceStyles,
                 selected = settings.voiceStyle,
                 onSelect = onVoiceStyleChange,
@@ -288,12 +290,6 @@ fun SettingsSheet(
                 checked = settings.musicEnabled,
                 onCheckedChange = onMusicChange,
                 description = stringResource(id = R.string.settings_music_desc),
-            )
-            ToggleRow(
-                title = stringResource(id = R.string.settings_haptics),
-                checked = settings.hapticsEnabled,
-                onCheckedChange = onHapticsChange,
-                description = stringResource(id = R.string.settings_haptics_desc),
             )
             ToggleRow(
                 title = stringResource(id = R.string.settings_keep_screen_on),
@@ -343,58 +339,63 @@ private fun ToggleRow(
 }
 
 /**
- * 紧凑的 SegmentedButton 风格二选一，用于播报方式切换。
+ * 循环轮数的最大取值。
+ *
+ * 不再跟随"当前节奏"的 totalRounds（4 / 6 / 5），让用户每天最多能练 12 轮。
+ */
+private const val MAX_ROUNDS: Int = 12
+
+/**
+ * 卡片列表风格的播报方式选择器。
+ *
+ * 与"环境音"分组使用完全一致的视觉：每条卡片带 RadioButton + 名称 + 描述，选中态用 primaryContainer。
  */
 @Composable
-private fun VoiceStyleSegmented(
+private fun VoiceStyleCardList(
     styles: List<VoiceStyle>,
     selected: VoiceStyle,
     onSelect: (VoiceStyle) -> Unit,
 ) {
-    androidx.compose.material3.Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(50),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+    styles.forEach { style ->
+        val isSelected = style == selected
+        val nameRes = when (style) {
+            VoiceStyle.SHORT -> R.string.voice_style_short_name
+            VoiceStyle.GENTLE_LONG -> R.string.voice_style_long_name
+        }
+        val descRes = when (style) {
+            VoiceStyle.SHORT -> R.string.voice_style_short_desc
+            VoiceStyle.GENTLE_LONG -> R.string.voice_style_long_desc
+        }
+        androidx.compose.material3.Surface(
+            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clickable { onSelect(style) },
         ) {
-            styles.forEach { style ->
-                val isSelected = style == selected
-                val nameRes = when (style) {
-                    VoiceStyle.SHORT -> R.string.voice_style_short_name
-                    VoiceStyle.GENTLE_LONG -> R.string.voice_style_long_name
-                }
-                val descRes = when (style) {
-                    VoiceStyle.SHORT -> R.string.voice_style_short_desc
-                    VoiceStyle.GENTLE_LONG -> R.string.voice_style_long_desc
-                }
-                androidx.compose.material3.Surface(
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0f),
-                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier
-                        .clickable { onSelect(style) },
-                ) {
-                    Column(
-                        modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            text = stringResource(id = nameRes),
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = stringResource(id = descRes),
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.RadioButton(
+                    selected = isSelected,
+                    onClick = { onSelect(style) },
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = stringResource(id = nameRes),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(id = descRes),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }

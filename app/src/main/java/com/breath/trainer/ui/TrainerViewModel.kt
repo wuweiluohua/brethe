@@ -20,12 +20,14 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+/** 与 SettingsSheet 滑块 / BreathingEngine.MAX_ROUNDS 保持一致。 */
+private const val MAX_ROUNDS: Int = 12
+
 data class TrainerUiSettings(
     val pattern: BreathingPattern = BreathingPatterns.FOUR_SEVEN_EIGHT,
     val totalRounds: Int = BreathingPatterns.FOUR_SEVEN_EIGHT.totalRounds,
     val soundEnabled: Boolean = true,
     val musicEnabled: Boolean = true,
-    val hapticsEnabled: Boolean = true,
     val keepScreenOn: Boolean = true,
     val ambient: AmbientSound = AmbientSounds.CALM,
     val voiceStyle: VoiceStyle = VoiceStyle.GENTLE_LONG,
@@ -36,7 +38,6 @@ data class TrainerUiSettings(
 private data class TrainerFlags(
     val sound: Boolean,
     val music: Boolean,
-    val haptics: Boolean,
     val keepScreenOn: Boolean,
     val themeMode: Int,
 )
@@ -47,7 +48,7 @@ private data class TrainerAudioPrefs(
     val voiceStyle: VoiceStyle,
 )
 
-/** 节奏 + 轮数：耦合在一起，轮数要 clamp 到 pattern.totalRounds。 */
+/** 节奏 + 轮数：耦合在一起，轮数要 clamp 到 MAX_ROUNDS（用户最多 12 轮）。 */
 private data class TrainerPatternRounds(
     val pattern: BreathingPattern,
     val totalRounds: Int,
@@ -59,14 +60,7 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
 
     private val engine = BreathingEngine(app.ttsManager).also { e ->
         e.onPhaseStart = { stepKind, round ->
-            // 触感反馈（独立于声音开关）
-            when (stepKind) {
-                BreathingStep.StepKind.INHALE,
-                BreathingStep.StepKind.EXHALE -> {
-                    if (uiSettings.value.hapticsEnabled) app.haptics.pulseSoft()
-                }
-                else -> Unit
-            }
+            // 触感反馈已移除。
 
             if (uiSettings.value.soundEnabled) {
                 // 训练正式开始后第一次播报"准备"，之后根据 voiceStyle 选择单词或长句
@@ -93,11 +87,9 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
                     uiSettings.value.voiceStyle == VoiceStyle.SHORT -> app.getString(stepShortRes)
                     else -> app.getString(stepLongRes)
                 }
-                // 长句播报用 flush，把上一句截断以跟上节奏；单词模式追加到队列
-                app.ttsManager.speakPhase(
-                    phrase,
-                    flush = !isFirstStep && uiSettings.value.voiceStyle == VoiceStyle.GENTLE_LONG,
-                )
+                // 单词 / 长句都使用 flush：上一句若还在播就立刻截断，节奏与口播保持同步。
+                // 长句若不 flush，慢速 TTS 会被下一阶段卡住、听起来像没提示。
+                app.ttsManager.speakPhase(phrase, flush = true)
 
                 when (stepKind) {
                     BreathingStep.StepKind.INHALE -> app.ttsManager.playInhaleChime()
@@ -113,7 +105,7 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         }
         e.onTrainFinished = {
             if (uiSettings.value.soundEnabled) {
-                app.ttsManager.speakPhase(app.getString(R.string.tts_finish))
+                app.ttsManager.speakPhase(app.getString(R.string.tts_finish), flush = true)
             }
         }
     }
@@ -129,17 +121,17 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         app.settingsRepository.totalRounds,
     ) { patternId, rounds ->
         val pattern = BreathingPatterns.findById(patternId)
-        TrainerPatternRounds(pattern, rounds.coerceIn(1, pattern.totalRounds))
+        // 轮数上限放宽到 MAX_ROUNDS = 12，不再被节奏 default 的 4/6/5 截断。
+        TrainerPatternRounds(pattern, rounds.coerceIn(1, MAX_ROUNDS))
     }
 
     private val flagsFlow: Flow<TrainerFlags> = combine(
         app.settingsRepository.soundEnabled,
         app.settingsRepository.musicEnabled,
-        app.settingsRepository.hapticsEnabled,
         app.settingsRepository.keepScreenOn,
         app.settingsRepository.themeMode,
-    ) { sound, music, haptics, keep, theme ->
-        TrainerFlags(sound, music, haptics, keep, theme)
+    ) { sound, music, keep, theme ->
+        TrainerFlags(sound, music, keep, theme)
     }
 
     private val audioPrefsFlow: Flow<TrainerAudioPrefs> = combine(
@@ -162,7 +154,6 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
             totalRounds = pr.totalRounds,
             soundEnabled = flags.sound,
             musicEnabled = flags.music,
-            hapticsEnabled = flags.haptics,
             keepScreenOn = flags.keepScreenOn,
             ambient = audio.ambient,
             voiceStyle = audio.voiceStyle,
@@ -189,7 +180,7 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
             val settings = uiSettings.value
             val pattern = settings.pattern
             engine.setPattern(pattern)
-            engine.setTotalRounds(settings.totalRounds.coerceIn(1, pattern.totalRounds))
+            engine.setTotalRounds(settings.totalRounds.coerceIn(1, MAX_ROUNDS))
             // MediaPlayer 初始化失败不能让整进程崩；只是该次训练没背景音而已
             runCatching { app.backgroundMusic.start() }
                 .onFailure { Log.w("TrainerViewModel", "backgroundMusic.start failed", it) }
@@ -208,12 +199,15 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectPattern(pattern: BreathingPattern) = viewModelScope.launch {
         app.settingsRepository.setPatternId(pattern.id)
-        val current = uiSettings.value
-        if (current.totalRounds > pattern.totalRounds) {
-            app.settingsRepository.setTotalRounds(pattern.totalRounds)
+        // 不再根据节奏 default 强行下调用户的 totalRounds；用户已选 12 轮就保持 12 轮。
+        // 切换节奏时若正在训练，先停掉 TTS / 音乐 / 引擎，回到新节奏的"准备好"起始界面。
+        if (engine.state.value.running) {
+            engine.stop()
+            app.ttsManager.pause()
+            app.backgroundMusic.stop()
         }
         engine.setPattern(pattern)
-        engine.setTotalRounds(uiSettings.value.totalRounds.coerceIn(1, pattern.totalRounds))
+        engine.setTotalRounds(uiSettings.value.totalRounds.coerceIn(1, MAX_ROUNDS))
     }
 
     fun setTotalRounds(value: Int) = viewModelScope.launch {
@@ -228,11 +222,6 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     fun setMusicEnabled(value: Boolean) = viewModelScope.launch {
         app.settingsRepository.setMusicEnabled(value)
         app.backgroundMusic.enabled = value
-    }
-
-    fun setHapticsEnabled(value: Boolean) = viewModelScope.launch {
-        app.settingsRepository.setHapticsEnabled(value)
-        app.haptics.enabled = value
     }
 
     fun setKeepScreenOn(value: Boolean) = viewModelScope.launch {

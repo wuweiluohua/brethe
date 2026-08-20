@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "breath_prefs")
 
 /**
- * 用户偏好持久化（训练轮数、声音开关、震动开关、背景音乐开关、保持屏幕常亮、当前节奏、当前环境音、播报方式）。
+ * 用户偏好持久化（训练轮数、声音开关、背景音乐开关、保持屏幕常亮、当前节奏、当前环境音、播报方式）。
  */
 class SettingsRepository(private val appContext: Context) {
 
@@ -23,7 +23,6 @@ class SettingsRepository(private val appContext: Context) {
         val TotalRounds = intPreferencesKey("total_rounds")
         val SoundEnabled = booleanPreferencesKey("sound_enabled")
         val MusicEnabled = booleanPreferencesKey("music_enabled")
-        val HapticsEnabled = booleanPreferencesKey("haptics_enabled")
         val KeepScreenOn = booleanPreferencesKey("keep_screen_on")
         val PatternId = stringPreferencesKey("pattern_id")
         val AmbientId = stringPreferencesKey("ambient_id")
@@ -41,10 +40,6 @@ class SettingsRepository(private val appContext: Context) {
 
     val musicEnabled: Flow<Boolean> = appContext.dataStore.data.map {
         it[Keys.MusicEnabled] ?: true
-    }
-
-    val hapticsEnabled: Flow<Boolean> = appContext.dataStore.data.map {
-        it[Keys.HapticsEnabled] ?: true
     }
 
     val keepScreenOn: Flow<Boolean> = appContext.dataStore.data.map {
@@ -78,10 +73,6 @@ class SettingsRepository(private val appContext: Context) {
 
     suspend fun setMusicEnabled(value: Boolean) = appContext.dataStore.edit {
         it[Keys.MusicEnabled] = value
-    }
-
-    suspend fun setHapticsEnabled(value: Boolean) = appContext.dataStore.edit {
-        it[Keys.HapticsEnabled] = value
     }
 
     suspend fun setKeepScreenOn(value: Boolean) = appContext.dataStore.edit {

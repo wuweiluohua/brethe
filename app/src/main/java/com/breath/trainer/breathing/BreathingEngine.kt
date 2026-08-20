@@ -95,11 +95,13 @@ class BreathingEngine(
     /** 切换呼吸节奏。允许在 idle 状态替换，或在训练中即时热替换。 */
     fun setPattern(pattern: BreathingPattern) {
         currentPattern = pattern
-        val safeRounds = _state.value.totalRounds.coerceIn(1, pattern.totalRounds)
+        // 保留用户的 totalRounds（最高 MAX_ROUNDS = 12），不再用节奏内嵌的
+        // totalRounds（4/6/5）覆盖——用户已经选好 12 轮，切节奏时不应该被悄悄改回 4/5/6。
+        val safeRounds = _state.value.totalRounds.coerceIn(1, MAX_ROUNDS)
         _state.update {
             it.copy(
                 pattern = pattern,
-                totalRounds = if (it.running) safeRounds else pattern.totalRounds,
+                totalRounds = safeRounds,
                 round = it.round.coerceIn(1, safeRounds),
             )
         }
@@ -108,7 +110,9 @@ class BreathingEngine(
     /** 单轮覆盖默认轮数（仅在 idle 状态生效）。 */
     fun setTotalRounds(rounds: Int) {
         _state.update {
-            val safe = rounds.coerceIn(1, currentPattern.totalRounds)
+            // 上限放宽到 12（SettingsRepository / SettingsSheet 滑块一致），
+            // 不再被节奏内嵌的 totalRounds（4/6/5）锁死，让用户每天最多能练 12 轮。
+            val safe = rounds.coerceIn(1, MAX_ROUNDS)
             it.copy(totalRounds = safe, round = it.round.coerceAtMost(safe).coerceAtLeast(1))
         }
     }
@@ -122,7 +126,7 @@ class BreathingEngine(
                 running = true,
                 paused = false,
                 round = initialRound.coerceIn(1, it.totalRounds),
-                totalRounds = it.totalRounds.coerceIn(1, currentPattern.totalRounds),
+                totalRounds = it.totalRounds.coerceIn(1, MAX_ROUNDS),
                 pattern = currentPattern,
             )
         }
@@ -186,8 +190,10 @@ class BreathingEngine(
                     if (_state.value.round > _state.value.totalRounds) return
                     if (index == currentPattern.steps.lastIndex) {
                         val nextRound = currentRound + 1
-                        if (nextRound > currentPattern.totalRounds) break
+                        // 先更新 round，再判断是否超过总轮数；
+                        // 旧写法 break 在 update 之前，会让 round 永远停在 totalRounds 触发 while 死循环。
                         _state.update { it.copy(round = nextRound) }
+                        if (nextRound > stateNow.totalRounds) break
                     }
                 }
                 if (_state.value.round > _state.value.totalRounds) break
@@ -282,5 +288,8 @@ class BreathingEngine(
 
     companion object {
         const val TICK_MS = 50L
+
+        /** 全局允许的最大轮数；与 SettingsSheet / SettingsRepository 保持一致。 */
+        const val MAX_ROUNDS: Int = 12
     }
 }

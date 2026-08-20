@@ -70,8 +70,11 @@ class TtsManager(private val appContext: Context) {
         }
 
         engine.language = locale
-        engine.setPitch(1.08f)        // 略升调，更柔和亲切
-        engine.setSpeechRate(0.48f)   // 语速更慢，让长句听起来温柔不催促
+        engine.setPitch(1.05f)        // 略升调，更柔和亲切
+        // 旧值 0.48 太慢：长句"慢慢地吸气，让气息充满腹部"用 0.48x 念完接近 5 秒，
+        // 而 INHALE 阶段只有 4 秒，下一阶段 start() 时会把上一句截断，听起来像没有语音。
+        // 0.85 是兼顾"温柔不催促"和"能完整播完"的经验值。
+        engine.setSpeechRate(0.85f)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             // 选择女声音色：很多系统会命名为 "female" / "Female"
@@ -99,14 +102,26 @@ class TtsManager(private val appContext: Context) {
         val message = text.trim()
         if (message.isEmpty()) return
 
-        // TTS 通道（长句 TTS 推荐 flush，避免上一句尾音拖到下一段）
-        if (ttsReady) {
+        // TTS 通道（长句 TTS 推荐 flush，避免上一句尾音拖到下一段）。
+        // 训练开始时 ttsReady 可能是 false：TTS 引擎初始化是异步的，
+        // 用户可能在 onInit 回调完成之前就点了开始。这种情况下也要尝试 speak，
+        // 让 TTS 引擎内部排队，等就绪后自动播出来，避免静默。
+        val t = tts
+        if (t != null) {
             try {
                 val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                tts?.speak(message, mode, null, "phase-${System.currentTimeMillis()}")
+                val result = t.speak(message, mode, null, "phase-${System.currentTimeMillis()}")
+                if (result == TextToSpeech.ERROR) {
+                    Log.w(tag, "TTS speak returned ERROR for: $message")
+                } else if (!ttsReady) {
+                    // speak 成功但 ttsReady 还是 false：等引擎就绪会自动播放。
+                    Log.i(tag, "TTS queued (not ready yet): $message")
+                }
             } catch (e: Exception) {
                 Log.w(tag, "TTS speak failed, fallback to chime: ${e.message}")
             }
+        } else {
+            Log.w(tag, "TTS engine is null, cannot speak: $message")
         }
 
         // 同时播放柔和音效

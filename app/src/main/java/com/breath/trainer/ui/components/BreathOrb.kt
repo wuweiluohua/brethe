@@ -36,10 +36,13 @@ import com.breath.trainer.ui.theme.PhaseReady
 /**
  * 呼吸光球：随阶段缩放与呼吸。
  *
- * - READY/EXHALE: 收 0.55
- * - INHALE: 撑到 1.0
- * - HOLD: 维持 1.0
+ * - READY/EXHALE 起点: 0.5
+ * - INHALE: 撑到 0.92
+ * - HOLD: 维持 0.92
  * 同时显示外圈光环（更柔和的呼吸感），并附带进度环。
+ *
+ * 整体半径被夹在 canvas 短边的 0.45 倍以内，确保外圈柔光 / 角落点 / 进度环
+ * 在窄屏设备上也不会伸出 PhaseTrack 之外或压到 RoundIndicator。
  */
 @Composable
 fun BreathOrb(
@@ -59,14 +62,18 @@ fun BreathOrb(
         else -> PhaseReady
     }
 
-    // 目标缩放（吸气逐渐放大；屏息保持；呼气逐渐收缩）
+    // 目标缩放（吸气逐渐放大；屏息保持；呼气逐渐收缩）。
+    // 把最大缩放从 1.0 降到 0.92，让外圈柔光 / 角落点 / 进度环在 4-7-8、盒式这种
+    // 节奏里也不至于压到 PhaseTrack 或伸出屏外；屏幕较矮的设备上仍可呼吸。
+    val maxScale = 0.92f
+    val minScale = 0.5f
     val targetScale = when (phase) {
-        BreathingEngine.Phase.INHALE -> 0.55f + 0.45f * progress
-        BreathingEngine.Phase.HOLD_AFTER_INHALE -> 1.0f
-        BreathingEngine.Phase.EXHALE -> 1.0f - 0.45f * progress
-        BreathingEngine.Phase.HOLD_AFTER_EXHALE -> 0.55f
-        BreathingEngine.Phase.READY -> 0.55f
-        BreathingEngine.Phase.COMPLETE -> 0.5f + 0.05f * kotlin.math.sin(progress * 3.14f)
+        BreathingEngine.Phase.INHALE -> minScale + (maxScale - minScale) * progress
+        BreathingEngine.Phase.HOLD_AFTER_INHALE -> maxScale
+        BreathingEngine.Phase.EXHALE -> maxScale - (maxScale - minScale) * progress
+        BreathingEngine.Phase.HOLD_AFTER_EXHALE -> minScale
+        BreathingEngine.Phase.READY -> minScale
+        BreathingEngine.Phase.COMPLETE -> 0.48f + 0.04f * kotlin.math.sin(progress * 3.14f)
     }
 
     // 该阶段剩余的时长（用于动画时长）。如果是 0/未开始，回退到固定的 4s。
@@ -84,7 +91,7 @@ fun BreathOrb(
     }.coerceAtLeast(1)
 
     // 缩放动画
-    val scale = remember { Animatable(0.55f) }
+    val scale = remember { Animatable(minScale) }
     LaunchedEffect(phase, phaseSeconds) {
         when (phase) {
             BreathingEngine.Phase.INHALE ->
@@ -92,13 +99,13 @@ fun BreathOrb(
             BreathingEngine.Phase.EXHALE ->
                 scale.animateTo(targetScale, tween(phaseSeconds * 1000 - 100, easing = LinearEasing))
             BreathingEngine.Phase.HOLD_AFTER_INHALE ->
-                scale.animateTo(1.0f, tween(400, easing = FastOutSlowInEasing))
+                scale.animateTo(maxScale, tween(400, easing = FastOutSlowInEasing))
             BreathingEngine.Phase.HOLD_AFTER_EXHALE ->
-                scale.animateTo(0.55f, tween(400, easing = FastOutSlowInEasing))
+                scale.animateTo(minScale, tween(400, easing = FastOutSlowInEasing))
             BreathingEngine.Phase.READY ->
-                scale.animateTo(0.55f, tween(600, easing = FastOutSlowInEasing))
+                scale.animateTo(minScale, tween(600, easing = FastOutSlowInEasing))
             BreathingEngine.Phase.COMPLETE ->
-                scale.animateTo(0.55f, tween(800, easing = FastOutSlowInEasing))
+                scale.animateTo(minScale, tween(800, easing = FastOutSlowInEasing))
         }
     }
 
@@ -118,27 +125,30 @@ fun BreathOrb(
         Canvas(modifier = Modifier.fillMaxSize()) {
             val canvasSize = this.size
             val center = Offset(canvasSize.width / 2f, canvasSize.height / 2f)
-            val radius = (kotlin.math.min(canvasSize.width, canvasSize.height) / 2f) * scale.value
+            // 用最短边的 45% 作为半径上限，给外圈柔光 / 进度环 / 角落脉冲点留出余量，
+            // 避免在窄屏或低高度设备上压到 PhaseTrack 或伸出左右边界。
+            val maxRadius = kotlin.math.min(canvasSize.width, canvasSize.height) * 0.45f
+            val radius = maxRadius * scale.value
 
             // 最外层柔光
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(phaseColor.copy(alpha = 0.06f), Color.Transparent),
+                    colors = listOf(phaseColor.copy(alpha = 0.05f), Color.Transparent),
                     center = center,
-                    radius = radius * 1.55f,
+                    radius = radius * 1.18f,
                 ),
-                radius = radius * 1.55f,
+                radius = radius * 1.18f,
                 center = center,
             )
 
             // 第 2 圈
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(phaseColor.copy(alpha = 0.18f), Color.Transparent),
+                    colors = listOf(phaseColor.copy(alpha = 0.16f), Color.Transparent),
                     center = center,
-                    radius = radius * 1.15f,
+                    radius = radius * 1.06f,
                 ),
-                radius = radius * 1.15f,
+                radius = radius * 1.06f,
                 center = center,
             )
 
@@ -172,21 +182,22 @@ fun BreathOrb(
                 style = Stroke(width = 2.dp.toPx()),
             )
             drawCircle(
-                color = scheme.outline.copy(alpha = 0.35f),
-                radius = radius * 1.45f,
+                color = scheme.outline.copy(alpha = 0.3f),
+                radius = radius * 1.22f,
                 center = center,
                 style = Stroke(width = 1.5.dp.toPx()),
             )
 
-            // 角落脉冲小点
-            val smallDotRadius = 4.dp.toPx() + 2.dp.toPx() * pulse
-            drawCircle(color = phaseColor.copy(alpha = 0.45f), radius = smallDotRadius, center = center.copy(x = center.x - radius * 1.2f))
-            drawCircle(color = phaseColor.copy(alpha = 0.45f), radius = smallDotRadius, center = center.copy(x = center.x + radius * 1.2f))
-            drawCircle(color = phaseColor.copy(alpha = 0.45f), radius = smallDotRadius, center = center.copy(y = center.y - radius * 1.2f))
-            drawCircle(color = phaseColor.copy(alpha = 0.45f), radius = smallDotRadius, center = center.copy(y = center.y + radius * 1.2f))
+            // 角落脉冲小点：收回到主球外缘附近，不再乘 1.2 跑到屏外
+            val smallDotRadius = 3.dp.toPx() + 1.5.dp.toPx() * pulse
+            val dotOrbit = radius * 1.08f
+            drawCircle(color = phaseColor.copy(alpha = 0.4f), radius = smallDotRadius, center = center.copy(x = center.x - dotOrbit))
+            drawCircle(color = phaseColor.copy(alpha = 0.4f), radius = smallDotRadius, center = center.copy(x = center.x + dotOrbit))
+            drawCircle(color = phaseColor.copy(alpha = 0.4f), radius = smallDotRadius, center = center.copy(y = center.y - dotOrbit))
+            drawCircle(color = phaseColor.copy(alpha = 0.4f), radius = smallDotRadius, center = center.copy(y = center.y + dotOrbit))
 
-            // 当前阶段秒数进度环
-            val arcRadius = radius * 1.35f
+            // 当前阶段秒数进度环：紧贴主球外缘，绝不超出可绘制区域
+            val arcRadius = radius * 1.14f
             val sweep = 360f * progress
             drawArc(
                 color = phaseColor,
@@ -195,7 +206,7 @@ fun BreathOrb(
                 useCenter = false,
                 topLeft = Offset(center.x - arcRadius, center.y - arcRadius),
                 size = Size(arcRadius * 2, arcRadius * 2),
-                style = Stroke(width = 4.dp.toPx()),
+                style = Stroke(width = 3.5.dp.toPx()),
             )
         }
     }
