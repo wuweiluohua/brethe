@@ -12,12 +12,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -142,11 +142,11 @@ fun BreathingScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 中部呼吸区：占据剩余空间，随屏幕高度自适应，固定元素（标题/节奏/轮数/阶段/按钮/提示）始终完整显示
+            // 中部呼吸区：固定占据约 45% 屏幕高度，随屏幕高度自适应
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .fillMaxHeight(0.45f),
                 contentAlignment = Alignment.Center,
             ) {
                 BreathOrb(state = state)
@@ -277,8 +277,8 @@ private fun PatternSelector(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             patterns.forEach { p ->
                 val isSelected = p.id == selected.id
@@ -287,7 +287,6 @@ private fun PatternSelector(
                     contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                     shape = RoundedCornerShape(50),
                     modifier = Modifier
-                        .weight(1f)
                         .clickable { onSelect(p) },
                 ) {
                     Text(
@@ -345,7 +344,6 @@ private fun PhaseTrack(phase: BreathingEngine.Phase, pattern: BreathingPattern) 
                 color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                 shape = RoundedCornerShape(50),
-                modifier = Modifier.weight(1f),
             ) {
                 Text(
                     text = stringResource(id = step.kind.labelStringRes()),
@@ -371,14 +369,13 @@ private fun ActionRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!running || phase == BreathingEngine.Phase.COMPLETE) {
             Button(
                 onClick = onStart,
                 modifier = Modifier
-                    .weight(1f)
                     .height(56.dp),
                 shape = RoundedCornerShape(50),
             ) {
@@ -407,7 +404,6 @@ private fun ActionRow(
             Button(
                 onClick = onTogglePause,
                 modifier = Modifier
-                    .weight(1f)
                     .height(56.dp),
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(
