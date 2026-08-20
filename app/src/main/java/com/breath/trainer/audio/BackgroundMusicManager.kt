@@ -10,7 +10,7 @@ import android.util.Log
 import java.io.IOException
 
 /**
- * 后台循环播放器：根据 [setAmbient] 在不同 [AmbientSound] 之间切换。
+ * 后台循环播放器：根据 [ambient] 在不同 [AmbientSound] 之间切换。
  *
  * - 默认播放 [AmbientSounds.CALM] 的 30 秒循环氛围音。
  * - 通过 [AudioAttributes] 标记为 [USAGE_MEDIA]，音量跟随系统媒体音量，避免与 TTS 抢流。
@@ -24,15 +24,28 @@ class BackgroundMusicManager(private val appContext: Context) {
     /** 是否启用循环播放。 */
     @Volatile
     var enabled: Boolean = true
+        set(value) {
+            field = value
+            if (!value) stop()
+        }
 
     /** 当前激活的环境音。 */
     @Volatile
     var ambient: AmbientSound = AmbientSounds.CALM
-        private set
+        set(value) {
+            val same = value.id == field.id
+            field = value
+            if (!enabled) return
+            if (!same && player?.isPlaying == true) restartInternal()
+        }
 
     /** 音量 0..1。默认调低，避免盖过温柔女声 / 提示音（提示音约 0.4–0.65）。 */
     @Volatile
     var volume: Float = 0.2f
+        set(value) {
+            field = value.coerceIn(0f, 1f)
+            player?.setVolume(field, field)
+        }
 
     fun start() {
         if (!enabled) return
@@ -91,36 +104,10 @@ class BackgroundMusicManager(private val appContext: Context) {
         }
     }
 
-    fun setEnabled(value: Boolean) {
-        enabled = value
-        if (!value) {
-            stop()
-        }
-        // 启用时不在后台自动播放；环境音仅在训练开始(start)时由 ViewModel 启动。
-    }
-
-    /**
-     * 切换环境音。仅在正在播放（训练进行中）时才热切换音源；
-     * 未播放时不要自动开始，避免一进入程序就响起环境音。
-     */
-    fun setAmbient(value: AmbientSound) {
-        val same = value.id == ambient.id
-        ambient = value
-        if (!enabled) return
-        if (!same && player?.isPlaying == true) {
-            restartInternal()
-        }
-    }
-
     private fun restartInternal() {
         val wasPlaying = player?.isPlaying == true
         stop()
         if (wasPlaying || enabled) start()
-    }
-
-    fun setVolume(value: Float) {
-        volume = value.coerceIn(0f, 1f)
-        player?.setVolume(volume, volume)
     }
 
     fun pause() {
