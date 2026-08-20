@@ -39,13 +39,11 @@
     <string name="settings_pattern">呼吸节奏</string>
     <string name="settings_pattern_subtitle">不同节奏适合不同场景，可以随时切换</string>
     <string name="settings_cycles">循环轮数</string>
-    <string name="settings_cycles_subtitle">建议每天 4–8 轮，初次可从 4 轮开始</string>
+    <string name="settings_cycles_subtitle">1 – 12 轮可选，建议每天 4–8 轮，初次可从 4 轮开始</string>
     <string name="settings_sound">温柔女声提示</string>
     <string name="settings_sound_desc">在每个阶段开始时用中文女声播报</string>
     <string name="settings_music">舒缓背景音乐</string>
     <string name="settings_music_desc">训练期间循环播放柔和的环境音</string>
-    <string name="settings_haptics">触感反馈</string>
-    <string name="settings_haptics_desc">在阶段切换时给予轻柔震动</string>
     <string name="settings_keep_screen_on">训练时保持屏幕常亮</string>
     <string name="settings_keep_screen_on_desc">避免训练时屏幕自动锁定</string>
 
