@@ -88,6 +88,8 @@ class BreathingEngine(
 
     /** 配置变更的回调（让 UI / ViewModel 触发语音与震动）。 */
     var onPhaseStart: ((BreathingStep.StepKind, Int) -> Unit)? = null
+    /** 训练正式开始前的热身播报（READY 阶段，仅触发一次）：节奏名称 + "准备开始"。 */
+    var onTrainStart: (() -> Unit)? = null
     var onRoundChanged: ((Int) -> Unit)? = null
     var onTrainFinished: (() -> Unit)? = null
     var onTick: ((Phase, Float) -> Unit)? = null
@@ -167,9 +169,10 @@ class BreathingEngine(
 
     private suspend fun runTraining() {
         try {
-            // 准备阶段 3s（不触发普通 step 回调，仅用 onTrainAboutToStart 风格通知）
+            // 准备阶段 3s：先做一次热身播报（节奏名称 + "准备开始"），仅此一次；
+            // 真正的每一步由下方循环里的 onPhaseStart 触发，首轮首吸也会正常播报"吸气"。
             _state.update { it.copy(phase = Phase.READY, progress = 0f) }
-            safeInvokeOnPhaseStart(BreathingStep.StepKind.INHALE, _state.value.round) // 视作热身播报
+            safeInvokeOnTrainStart()
             if (!awaitTick(Phase.READY, Phase.READY.secondsDefault)) return
 
             while (true) {
@@ -218,6 +221,14 @@ class BreathingEngine(
             onPhaseStart?.invoke(kind, round)
         } catch (e: Throwable) {
             Log.e("BreathingEngine", "onPhaseStart callback threw", e)
+        }
+    }
+
+    private inline fun safeInvokeOnTrainStart() {
+        try {
+            onTrainStart?.invoke()
+        } catch (e: Throwable) {
+            Log.e("BreathingEngine", "onTrainStart callback threw", e)
         }
     }
 

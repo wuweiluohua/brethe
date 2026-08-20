@@ -59,17 +59,24 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     private val app = application as BreathApplication
 
     private val engine = BreathingEngine(app.ttsManager).also { e ->
-        e.onPhaseStart = { stepKind, round ->
-            // 触感反馈已移除。
-
+        // 训练开始（READY 阶段）一次性热身播报：节奏名称 + "准备开始"。
+        e.onTrainStart = {
             if (uiSettings.value.soundEnabled) {
-                // 训练正式开始后第一次播报"准备"，之后根据 voiceStyle 选择单词或长句
-                val isFirstStep = round == 1 && stepKind == BreathingStep.StepKind.INHALE
                 val startRes = when (uiSettings.value.pattern.id) {
                     "426" -> R.string.tts_start_426
                     "box" -> R.string.tts_start_box
                     else -> R.string.tts_start_478
                 }
+                app.ttsManager.speakPhase(app.getString(startRes), flush = true)
+            }
+        }
+
+        e.onPhaseStart = { stepKind, round ->
+            // 触感反馈已移除。
+
+            if (uiSettings.value.soundEnabled) {
+                // 每一步（含首轮首吸）都按当前播报方式正常播报对应指令，
+                // 首步不再插播"准备开始"——那句由 onTrainStart 在训练开始时播一次。
                 val stepShortRes = when (stepKind) {
                     BreathingStep.StepKind.INHALE -> R.string.tts_inhale
                     BreathingStep.StepKind.HOLD_AFTER_INHALE -> R.string.tts_hold_inhale
@@ -82,10 +89,10 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
                     BreathingStep.StepKind.EXHALE -> R.string.tts_phrase_exhale
                     BreathingStep.StepKind.HOLD_AFTER_EXHALE -> R.string.tts_phrase_hold_exhale
                 }
-                val phrase = when {
-                    isFirstStep -> app.getString(startRes)
-                    uiSettings.value.voiceStyle == VoiceStyle.SHORT -> app.getString(stepShortRes)
-                    else -> app.getString(stepLongRes)
+                val phrase = if (uiSettings.value.voiceStyle == VoiceStyle.SHORT) {
+                    app.getString(stepShortRes)
+                } else {
+                    app.getString(stepLongRes)
                 }
                 // 单词 / 长句都使用 flush：上一句若还在播就立刻截断，节奏与口播保持同步。
                 // 长句若不 flush，慢速 TTS 会被下一阶段卡住、听起来像没提示。
