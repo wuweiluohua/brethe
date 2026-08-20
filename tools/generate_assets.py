@@ -1,15 +1,17 @@
-"""生成舒缓的WAV背景音乐和轻柔提示音。
+"""生成舒缓的WAV背景音乐和轻柔提示音（第二版，更拟真的自然声）。
 
 输出:
-- raw/ambient_calm.wav      30 秒循环的舒缓环境音（默认开场）
-- raw/ambient_rain.wav      雨声
-- raw/ambient_birds.wav     鸟鸣
-- raw/ambient_ocean.wav     海浪
-- raw/ambient_stream.wav    溪水
-- raw/ambient_campfire.wav  篝火
+- raw/ambient_calm.wav      30 秒循环的舒缓氛围 pad（默认开场）
+- raw/ambient_rain.wav      雨声（宽带雨幕底噪 + 密集带通水滴 pitter-patter）
+- raw/ambient_birds.wav     鸟鸣（清晨草地底床 + 带颤音/滑音的鸟叫与啁啾）
+- raw/ambient_ocean.wav     海浪（双周期浪涌 + 浪尖泡沫嘶声）
+- raw/ambient_stream.wav    溪水（中高频潺潺水声 + 随机气泡 blop 下滑音）
+- raw/ambient_campfire.wav  篝火（低频燃烧床 + 高频噼啪爆裂）
 - raw/chime_phase.wav       阶段切换钟铃 (C5)
 - raw/chime_breath_in.wav   吸气开始 (E5)
 - raw/chime_breath_out.wav  呼气开始 (A4)
+
+所有环境音都做 1.5s 首尾交叉淡化（crossfade_loop），形成真正无缝循环。
 """
 import math
 import os
@@ -22,8 +24,8 @@ OUT_DIR = r"H:\daydayup\workbuddy\2026-08-18-20-06-25\BreathTrainer\app\src\main
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
-def write_wav(path: str, samples: list[float]) -> None:
-    """16-bit PCM mono WAV."""
+def write_wav(path: str, samples: list) -> None:
+    """16-bit PCM mono WAV。"""
     pcm = bytearray()
     for s in samples:
         v = max(-1.0, min(1.0, s))
@@ -36,26 +38,7 @@ def write_wav(path: str, samples: list[float]) -> None:
     print(f"Wrote {path} ({os.path.getsize(path) / 1024:.1f} KB)")
 
 
-def envelope(i: int, n: int, attack: float = 0.05, release: float = 0.4) -> float:
-    a = int(attack * n)
-    r = int(release * n)
-    if i < a:
-        return i / a
-    if i > n - r:
-        return (n - i) / r
-    return 1.0
-
-
-def fade_loop(samples: list[float], fade_seconds: float = 0.5) -> None:
-    """渐入渐出，避免 pop。"""
-    fade = int(fade_seconds * SAMPLE_RATE)
-    for i in range(fade):
-        a = i / fade
-        samples[i] *= a
-        samples[-(i + 1)] *= a
-
-
-def soft_limit(samples: list[float], peak_target: float = 0.92) -> None:
+def soft_limit(samples: list, peak_target: float = 0.92) -> None:
     peak = max(abs(x) for x in samples) or 1.0
     if peak > peak_target:
         gain = peak_target / peak
@@ -63,14 +46,14 @@ def soft_limit(samples: list[float], peak_target: float = 0.92) -> None:
             samples[i] *= gain
 
 
-def crossfade_loop(samples: list[float], xfade_seconds: float = 1.0) -> None:
-    """让一个 WAV 真正"无缝"循环：把首尾 xfade_seconds 交叉混合。"""
+def crossfade_loop(samples: list, xfade_seconds: float = 1.5) -> None:
+    """让 WAV 真正"无缝"循环：把首尾 xfade_seconds 交叉混合。"""
     n = len(samples)
     xfade = int(xfade_seconds * SAMPLE_RATE)
     if xfade * 2 >= n:
         return
     for i in range(xfade):
-        a = i / xfade  # 0..1
+        a = i / xfade
         head = samples[i]
         tail = samples[n - xfade + i]
         mixed = head * a + tail * (1 - a)
@@ -79,20 +62,92 @@ def crossfade_loop(samples: list[float], xfade_seconds: float = 1.0) -> None:
 
 
 # ------------------------------------------------------------------
-# 1. 背景音乐：30秒循环的低频氛围 + 缓慢的pad和声（默认 calma）
+# 噪声原语
 # ------------------------------------------------------------------
-def generate_ambient(seconds: float = 30.0, loop_seconds: float = 30.0) -> list[float]:
+def white_noise(n: int, seed=None) -> list:
+    if seed is not None:
+        random.seed(seed)
+    return [random.uniform(-1.0, 1.0) for _ in range(n)]
+
+
+def pink_noise(n: int, seed=None) -> list:
+    """Paul Kellet 粉红噪声近似。"""
+    if seed is not None:
+        random.seed(seed)
+    b0 = b1 = b2 = b3 = b4 = b5 = b6 = 0.0
+    out = [0.0] * n
+    for i in range(n):
+        w = random.uniform(-1.0, 1.0)
+        b0 = 0.99886 * b0 + w * 0.0555179
+        b1 = 0.99332 * b1 + w * 0.0750759
+        b2 = 0.96900 * b2 + w * 0.1538520
+        b3 = 0.86650 * b3 + w * 0.3104856
+        b4 = 0.55000 * b4 + w * 0.5329522
+        b5 = -0.7616 * b5 - w * 0.0168980
+        out[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11
+        b6 = w * 0.115926
+    return out
+
+
+def brown_noise(n: int, seed=None) -> list:
+    if seed is not None:
+        random.seed(seed)
+    out = [0.0] * n
+    last = 0.0
+    for i in range(n):
+        w = random.uniform(-1.0, 1.0)
+        last = (last + 0.02 * w) / 1.02
+        out[i] = last * 3.5
+    return out
+
+
+def one_pole_lp(x: list, cutoff: float = 0.1) -> list:
+    y = [0.0] * len(x)
+    prev = 0.0
+    for i, s in enumerate(x):
+        prev = prev + cutoff * (s - prev)
+        y[i] = prev
+    return y
+
+
+def one_pole_hp(x: list, cutoff: float = 0.05) -> list:
+    y = [0.0] * len(x)
+    prev_in = 0.0
+    prev_out = 0.0
+    for i, s in enumerate(x):
+        prev_out = (1 - cutoff) * (prev_out + s - prev_in)
+        prev_in = s
+        y[i] = prev_out
+    return y
+
+
+def bandpass(x: list, hi: float, lo: float) -> list:
+    """先高通（保留高于 hi 的部分），再低通（保留低于 lo 的部分）。"""
+    return one_pole_lp(one_pole_hp(x, hi), lo)
+
+
+def stamp(samples: list, template: list, pos: int) -> None:
+    n = len(samples)
+    m = len(template)
+    for j in range(m):
+        idx = pos + j
+        if 0 <= idx < n:
+            samples[idx] += template[j]
+
+
+# ------------------------------------------------------------------
+# 1. 默认氛围 pad（30s 循环）
+# ------------------------------------------------------------------
+def generate_ambient(seconds: float = 30.0) -> list:
     n = int(seconds * SAMPLE_RATE)
-    loop_n = int(loop_seconds * SAMPLE_RATE)
     samples = [0.0] * n
     chord_freqs = [
-        [130.81, 164.81, 196.00, 261.63, 329.63],   # C maj
-        [110.00, 130.81, 164.81, 220.00, 261.63],   # A min
-        [87.31,  130.81, 174.61, 220.00, 261.63],   # F maj
-        [98.00,  146.83, 196.00, 246.94, 293.66],   # G maj
+        [130.81, 164.81, 196.00, 261.63, 329.63],
+        [110.00, 130.81, 164.81, 220.00, 261.63],
+        [87.31, 130.81, 174.61, 220.00, 261.63],
+        [98.00, 146.83, 196.00, 246.94, 293.66],
     ]
-    chord_steps = loop_n // len(chord_freqs)
-
+    chord_steps = n // len(chord_freqs)
     random.seed(42)
     noise_state = 0.0
     for i in range(n):
@@ -109,21 +164,18 @@ def generate_ambient(seconds: float = 30.0, loop_seconds: float = 30.0) -> list[
         s = s / len(chord)
         lfo = 0.5 + 0.5 * math.sin(2 * math.pi * 0.07 * i / SAMPLE_RATE)
         s *= 0.18 * crossfade * (0.55 + 0.45 * lfo)
-        if random.random() < 0.00015:
-            s += 0.06 * math.sin(2 * math.pi * (880 + random.random() * 600) * i / SAMPLE_RATE)
         noise_state = 0.96 * noise_state + 0.04 * (random.random() - 0.5)
         s += 0.04 * noise_state
         samples[i] = s * 0.6
-
     soft_limit(samples)
-    fade_loop(samples)
+    crossfade_loop(samples, 1.5)
     return samples
 
 
 # ------------------------------------------------------------------
 # 2. 柔和钟铃提示音
 # ------------------------------------------------------------------
-def generate_gong(freq: float = 528.0, seconds: float = 1.4, decay: float = 4.0) -> list[float]:
+def generate_gong(freq: float = 528.0, seconds: float = 1.4, decay: float = 4.0) -> list:
     n = int(seconds * SAMPLE_RATE)
     samples = []
     for i in range(n):
@@ -144,189 +196,194 @@ def generate_gong(freq: float = 528.0, seconds: float = 1.4, decay: float = 4.0)
 
 
 # ------------------------------------------------------------------
-# 白噪声工具
+# 3. 雨声（30s）— 宽带雨幕底噪 + 密集带通水滴 pitter-patter
 # ------------------------------------------------------------------
-def white_noise(n: int) -> list[float]:
-    return [random.uniform(-1.0, 1.0) for _ in range(n)]
-
-
-def one_pole_lp(x: list[float], cutoff: float = 0.1) -> list[float]:
-    """一阶低通；cutoff 越大通过越多高频。"""
-    y = [0.0] * len(x)
-    prev = 0.0
-    for i, s in enumerate(x):
-        prev = prev + cutoff * (s - prev)
-        y[i] = prev
-    return y
-
-
-def one_pole_hp(x: list[float], cutoff: float = 0.05) -> list[float]:
-    """一阶高通：prev_output = x - prev_in + cutoff*prev_in ；这里用近似。"""
-    y = [0.0] * len(x)
-    prev_in = 0.0
-    prev_out = 0.0
-    for i, s in enumerate(x):
-        prev_out = (1 - cutoff) * (prev_out + s - prev_in)
-        prev_in = s
-        y[i] = prev_out
-    return y
-
-
-# ------------------------------------------------------------------
-# 3. 雨声（30s）— 全频段粉噪 + 随机雨滴撞击
-# ------------------------------------------------------------------
-def generate_rain(seconds: float = 30.0) -> list[float]:
+def generate_rain(seconds: float = 30.0) -> list:
     random.seed(11)
     n = int(seconds * SAMPLE_RATE)
-    base = white_noise(n)
-    # 通过更柔和的低通得到粉噪感觉
-    body = one_pole_lp(base, cutoff=0.45)
-    # 高频细节——单独一路，再叠回来
-    sparkle = one_pole_hp(base, cutoff=0.7)
-    samples = [0.7 * body[i] + 0.18 * sparkle[i] for i in range(n)]
+    w = white_noise(n)
+    body = one_pole_lp(w, cutoff=0.25)        # 低频雨幕
+    hiss = one_pole_hp(w, cutoff=0.6)         # 高频雨丝
+    samples = [0.32 * body[i] + 0.5 * hiss[i] for i in range(n)]
 
-    # 稀疏雨滴 click：短促高通脉冲
-    drops = max(40, int(seconds * 12))
-    for _ in range(drops):
-        start = random.randint(0, n - 800)
-        amp = random.uniform(0.25, 0.6)
-        for j in range(400):
-            if start + j >= n:
-                break
-            env = math.exp(-(j / 40.0))
-            samples[start + j] += amp * env * (random.uniform(-1, 1))
+    # 密集小水滴：带通的衰减正弦，模拟 pitter-patter（约 70 个/秒）
+    L = int(0.02 * SAMPLE_RATE)
+    for _ in range(int(seconds * 70)):
+        pos = random.randint(0, n - L)
+        f = random.uniform(1800, 5000)
+        g = random.uniform(0.05, 0.18)
+        for j in range(L):
+            env = math.exp(-j / (0.004 * SAMPLE_RATE))
+            samples[pos + j] += g * env * math.sin(2 * math.pi * f * j / SAMPLE_RATE)
+
+    # 稀疏大雨滴：更低频、更长衰减
+    Lh = int(0.05 * SAMPLE_RATE)
+    for _ in range(int(seconds * 5)):
+        pos = random.randint(0, n - Lh)
+        f = random.uniform(400, 900)
+        g = random.uniform(0.12, 0.30)
+        for j in range(Lh):
+            env = math.exp(-j / (0.02 * SAMPLE_RATE))
+            samples[pos + j] += g * env * math.sin(2 * math.pi * f * j / SAMPLE_RATE)
 
     soft_limit(samples, 0.9)
-    fade_loop(samples)
+    crossfade_loop(samples, 1.2)
+    return samples
+
+
+# ------------------------------------------------------------------
+# 4. 鸟鸣（45s）— 清晨草地底床 + 带颤音/滑音的鸟叫与啁啾
+# ------------------------------------------------------------------
+def bird_note(f0: float, f1: float, dur: float, harm: int = 3,
+              vib: float = 6.0, vibd: float = 0.04, attack: float = 0.006) -> list:
+    L = int(dur * SAMPLE_RATE)
+    out = [0.0] * L
+    for j in range(L):
+        t = j / SAMPLE_RATE
+        f = f0 + (f1 - f0) * (j / L)
+        f += vibd * f * math.sin(2 * math.pi * vib * t)   # 颤音
+        s = math.sin(2 * math.pi * f * t)
+        for h in range(2, harm + 1):                      # 少量谐波，更明亮像鸟
+            s += (0.5 / h) * math.sin(2 * math.pi * f * h * t)
+        if t < attack:
+            env = t / attack
+        else:
+            env = math.exp(-(t - attack) * 3.0)
+        out[j] = s * env
+    return out
+
+
+def generate_birds(seconds: float = 45.0) -> list:
+    random.seed(23)
+    n = int(seconds * SAMPLE_RATE)
+    w = white_noise(n)
+    bed = one_pole_lp(w, cutoff=0.18)     # 低频草地/微风
+    hiss = one_pole_hp(w, cutoff=0.7)     # 叶片高频
+    samples = [0.16 * bed[i] for i in range(n)]
+
+    # 偶发叶片沙沙
+    for _ in range(int(seconds * 1.5)):
+        pos = random.randint(0, n - int(0.4 * SAMPLE_RATE))
+        L = int(0.4 * SAMPLE_RATE)
+        g = random.uniform(0.02, 0.06)
+        for j in range(L):
+            samples[pos + j] += g * math.exp(-abs(j - L / 2) / (0.12 * SAMPLE_RATE)) * hiss[pos + j]
+
+    # 鸟叫乐句
+    t = 1.0
+    while t < seconds - 1.0:
+        kind = random.random()
+        if kind < 0.30:                       # 上行滑音
+            note = bird_note(random.uniform(2200, 2800), random.uniform(3000, 3600), 0.18, harm=3)
+            stamp(samples, note, int(t * SAMPLE_RATE))
+            t += 0.18 + random.uniform(0.05, 0.15)
+        elif kind < 0.55:                     # 下行滑音
+            note = bird_note(random.uniform(3000, 3600), random.uniform(2200, 2700), 0.22, harm=3)
+            stamp(samples, note, int(t * SAMPLE_RATE))
+            t += 0.22 + random.uniform(0.05, 0.15)
+        elif kind < 0.78:                     # 两音
+            a = bird_note(random.uniform(2600, 3000), random.uniform(2600, 3000), 0.10, harm=3)
+            b = bird_note(random.uniform(3000, 3500), random.uniform(3200, 3700), 0.12, harm=3)
+            stamp(samples, a, int(t * SAMPLE_RATE)); t += 0.14
+            stamp(samples, b, int(t * SAMPLE_RATE)); t += 0.16
+        else:                                 # 啁啾（快速重复）
+            base = random.uniform(2600, 3800)
+            for _ in range(random.randint(4, 9)):
+                note = bird_note(base * (1 + random.uniform(-0.05, 0.05)),
+                                 base * (1 + random.uniform(-0.05, 0.05)), 0.05, harm=3)
+                stamp(samples, note, int(t * SAMPLE_RATE))
+                t += 0.07
+        t += random.uniform(1.2, 3.5)        # 乐句间隔
+    soft_limit(samples, 0.85)
     crossfade_loop(samples, 0.6)
     return samples
 
 
 # ------------------------------------------------------------------
-# 4. 鸟鸣（45s）— 平缓粉噪 + 不规则鸟叫（频率 1800-3200Hz 短 chirp）
+# 5. 海浪（32s）— 双周期浪涌 + 浪尖泡沫嘶声
 # ------------------------------------------------------------------
-def generate_birds(seconds: float = 45.0) -> list[float]:
-    random.seed(23)
-    n = int(seconds * SAMPLE_RATE)
-    base = white_noise(n)
-    samples = [0.0] * n
-    # 低频"草地"环境音
-    bed = one_pole_lp(base, cutoff=0.35)
-    for i in range(n):
-        samples[i] += 0.32 * bed[i]
-
-    # 鸟鸣：对每个 chirp 是一组带轻颤的频率跳跃
-    num_calls = int(seconds * 0.9)  # 平均每秒 0.9 次
-    for _ in range(num_calls):
-        start = random.randint(0, n - int(0.6 * SAMPLE_RATE))
-        dur = random.randint(int(0.08 * SAMPLE_RATE), int(0.35 * SAMPLE_RATE))
-        base_f = random.uniform(1800, 3200)
-        # 频率包络在 chirp 中轻微上行/下行
-        amp = random.uniform(0.35, 0.7)
-        for j in range(dur):
-            t = j / SAMPLE_RATE
-            env = math.exp(-(t / (dur / SAMPLE_RATE)) * 2.0)
-            wob = math.sin(2 * math.pi * (8 + random.random() * 5) * t)
-            f = base_f * (1 + 0.08 * wob)
-            sig = math.sin(2 * math.pi * f * t) * env * amp
-            # 添加一个比基频低 5x 的鸟胸腔共振
-            sig += 0.4 * math.sin(2 * math.pi * (f / 5) * t) * env * amp
-            idx = start + j
-            if idx < n:
-                samples[idx] += sig
-
-    soft_limit(samples, 0.85)
-    fade_loop(samples)
-    crossfade_loop(samples, 0.5)
-    return samples
-
-
-# ------------------------------------------------------------------
-# 5. 海浪（32s）— 周期性浪涌，约每 8 秒一次
-# ------------------------------------------------------------------
-def generate_ocean(seconds: float = 32.0) -> list[float]:
+def generate_ocean(seconds: float = 32.0) -> list:
     random.seed(37)
     n = int(seconds * SAMPLE_RATE)
-    base = white_noise(n)
-    # 重要：低/高通必须在循环外算一次，否则 O(n²)
-    roar = one_pole_lp(base, cutoff=0.12)
-    hiss = one_pole_hp(base, cutoff=0.6)
+    w = white_noise(n)
+    roar = brown_noise(n, seed=38)            # 低频浪体
+    foam = one_pole_hp(w, cutoff=0.5)         # 浪尖泡沫
     samples = [0.0] * n
-    wave_period = 8.0  # 8 秒一个浪
     for i in range(n):
         t = i / SAMPLE_RATE
-        phase = (t % wave_period) / wave_period
-        if phase < 0.30:
-            env = (phase / 0.30) ** 1.5
-        elif phase < 0.55:
-            env = 1.0
-        else:
-            env = ((1.0 - phase) / 0.45) ** 1.8
-        samples[i] = 0.55 * roar[i] * env + 0.18 * hiss[i] * (env ** 1.5)
-
+        s1 = 0.5 + 0.5 * math.sin(2 * math.pi * (1 / 9.0) * t)
+        s2 = 0.5 + 0.5 * math.sin(2 * math.pi * (1 / 13.0) * t + 1.7)
+        env = (s1 * 0.6 + s2 * 0.4) ** 2.2
+        samples[i] = 0.5 * roar[i] * env + 0.35 * foam[i] * (env * env)
     soft_limit(samples, 0.88)
-    fade_loop(samples, fade_seconds=1.5)
-    crossfade_loop(samples, 1.0)
+    crossfade_loop(samples, 1.5)
     return samples
 
 
 # ------------------------------------------------------------------
-# 6. 溪水（25s）— 高频嘶嘶感 + 间歇水花 pluck
+# 6. 溪水（25s）— 中高频潺潺水声 + 随机气泡 blop 下滑音
 # ------------------------------------------------------------------
-def generate_stream(seconds: float = 25.0) -> list[float]:
+def generate_stream(seconds: float = 25.0) -> list:
     random.seed(53)
     n = int(seconds * SAMPLE_RATE)
-    base = white_noise(n)
-    hiss = one_pole_hp(base, cutoff=0.85)  # 高频水流主体
-    body = one_pole_lp(base, cutoff=0.5)
-    samples = [0.45 * hiss[i] + 0.18 * body[i] for i in range(n)]
-
-    # 偶尔"水滴溅起"短促 pluck：短正弦串 + 快速衰减
-    plucks = int(seconds * 3.5)
-    for _ in range(plucks):
-        start = random.randint(0, n - 1500)
-        f = random.uniform(800, 2200)
-        dur = random.randint(120, 600)
-        amp = random.uniform(0.18, 0.45)
-        for j in range(dur):
+    w = white_noise(n)
+    gurgle = bandpass(w, hi=0.35, lo=0.85)   # 中高频水流主体
+    flow = brown_noise(n, seed=54)           # 低频水流
+    samples = [0.0] * n
+    wob = 0.5
+    for i in range(n):
+        if i % 200 == 0:
+            wob = max(0.3, min(1.0, wob + random.uniform(-0.1, 0.1)))
+        samples[i] = 0.45 * gurgle[i] * wob + 0.12 * flow[i]
+    # 气泡：快速下滑的正弦 blop
+    for _ in range(int(seconds * 6)):
+        pos = random.randint(0, n - int(0.08 * SAMPLE_RATE))
+        L = int(0.08 * SAMPLE_RATE)
+        f0 = random.uniform(500, 900)
+        f1 = random.uniform(200, 400)
+        g = random.uniform(0.12, 0.30)
+        for j in range(L):
             t = j / SAMPLE_RATE
-            env = math.exp(-(j / 60.0))
-            idx = start + j
-            if idx < n:
-                samples[idx] += amp * env * math.sin(2 * math.pi * f * t)
-
+            f = f0 + (f1 - f0) * (j / L)
+            env = math.exp(-j / (0.02 * SAMPLE_RATE))
+            samples[pos + j] += g * env * math.sin(2 * math.pi * f * t)
     soft_limit(samples, 0.85)
-    fade_loop(samples)
-    crossfade_loop(samples, 0.5)
+    crossfade_loop(samples, 0.6)
     return samples
 
 
 # ------------------------------------------------------------------
-# 7. 篝火（35s）— 缓慢低频燃烧 + 随机噼啪短脉冲
+# 7. 篝火（35s）— 低频燃烧床 + 高频噼啪爆裂
 # ------------------------------------------------------------------
-def generate_campfire(seconds: float = 35.0) -> list[float]:
+def generate_campfire(seconds: float = 35.0) -> list:
     random.seed(71)
     n = int(seconds * SAMPLE_RATE)
-    base = white_noise(n)
-    # 低沉燃烧床
-    bed = one_pole_lp(base, cutoff=0.2)
-    samples = [0.55 * bed[i] for i in range(n)]
-
-    # 噼啪：短爆裂（白噪脉冲 + 快速指数衰减）
-    crackles = int(seconds * 4.0)
-    for _ in range(crackles):
-        start = random.randint(0, n - 2000)
-        dur = random.randint(60, 250)
-        amp = random.uniform(0.25, 0.7)
-        for j in range(dur):
-            env = math.exp(-(j / 25.0))
-            idx = start + j
+    w = white_noise(n)
+    bed = brown_noise(n, seed=72)            # 温暖低频燃烧床
+    hiss = one_pole_hp(w, cutoff=0.85)       # 火焰高频嘶声（也用于噼啪带通）
+    samples = [0.22 * bed[i] + 0.04 * hiss[i] for i in range(n)]
+    # 密集噼啪：锐利的带通衰减噪声爆裂
+    Lc = int(0.05 * SAMPLE_RATE)
+    for _ in range(int(seconds * 10)):
+        pos = random.randint(0, n - Lc)
+        g = random.uniform(0.15, 0.5)
+        for j in range(Lc):
+            env = math.exp(-j / (0.008 * SAMPLE_RATE))
+            idx = pos + j
             if idx < n:
-                samples[idx] += amp * env * random.uniform(-1, 1) * 0.7
-
-    soft_limit(samples, 0.88)
-    fade_loop(samples)
-    crossfade_loop(samples, 0.5)
+                samples[idx] += g * env * hiss[idx]
+    # 偶发大爆裂
+    Lp = int(0.12 * SAMPLE_RATE)
+    for _ in range(int(seconds * 0.4)):
+        pos = random.randint(0, n - Lp)
+        g = random.uniform(0.4, 0.85)
+        for j in range(Lp):
+            env = math.exp(-j / (0.02 * SAMPLE_RATE))
+            idx = pos + j
+            if idx < n:
+                samples[idx] += g * env * hiss[idx]
+    soft_limit(samples, 0.9)
+    crossfade_loop(samples, 0.6)
     return samples
 
 
@@ -335,31 +392,18 @@ def generate_campfire(seconds: float = 35.0) -> list[float]:
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     print("=== 背景音乐 ===")
-    ambient = generate_ambient(seconds=30.0, loop_seconds=30.0)
-    write_wav(os.path.join(OUT_DIR, "ambient_calm.wav"), ambient)
+    write_wav(os.path.join(OUT_DIR, "ambient_calm.wav"), generate_ambient(seconds=30.0))
 
-    print("=== 白噪声环境音 ===")
-    rain = generate_rain(seconds=30.0)
-    write_wav(os.path.join(OUT_DIR, "ambient_rain.wav"), rain)
-
-    birds = generate_birds(seconds=45.0)
-    write_wav(os.path.join(OUT_DIR, "ambient_birds.wav"), birds)
-
-    ocean = generate_ocean(seconds=32.0)
-    write_wav(os.path.join(OUT_DIR, "ambient_ocean.wav"), ocean)
-
-    stream = generate_stream(seconds=25.0)
-    write_wav(os.path.join(OUT_DIR, "ambient_stream.wav"), stream)
-
-    fire = generate_campfire(seconds=35.0)
-    write_wav(os.path.join(OUT_DIR, "ambient_campfire.wav"), fire)
+    print("=== 自然白噪声环境音 ===")
+    write_wav(os.path.join(OUT_DIR, "ambient_rain.wav"), generate_rain(seconds=30.0))
+    write_wav(os.path.join(OUT_DIR, "ambient_birds.wav"), generate_birds(seconds=45.0))
+    write_wav(os.path.join(OUT_DIR, "ambient_ocean.wav"), generate_ocean(seconds=32.0))
+    write_wav(os.path.join(OUT_DIR, "ambient_stream.wav"), generate_stream(seconds=25.0))
+    write_wav(os.path.join(OUT_DIR, "ambient_campfire.wav"), generate_campfire(seconds=35.0))
 
     print("=== 提示音 ===")
-    gong = generate_gong(freq=523.25, seconds=1.2, decay=3.5)  # C5
-    write_wav(os.path.join(OUT_DIR, "chime_phase.wav"), gong)
-    inhale = generate_gong(freq=659.25, seconds=0.9, decay=5.0)  # E5
-    write_wav(os.path.join(OUT_DIR, "chime_breath_in.wav"), inhale)
-    exhale = generate_gong(freq=440.00, seconds=1.2, decay=3.2)  # A4
-    write_wav(os.path.join(OUT_DIR, "chime_breath_out.wav"), exhale)
+    write_wav(os.path.join(OUT_DIR, "chime_phase.wav"), generate_gong(freq=523.25, seconds=1.2, decay=3.5))
+    write_wav(os.path.join(OUT_DIR, "chime_breath_in.wav"), generate_gong(freq=659.25, seconds=0.9, decay=5.0))
+    write_wav(os.path.join(OUT_DIR, "chime_breath_out.wav"), generate_gong(freq=440.00, seconds=1.2, decay=3.2))
 
     print("All audio assets generated.")
