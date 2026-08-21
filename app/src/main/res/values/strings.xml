@@ -40,8 +40,11 @@
     <string name="settings_pattern_subtitle">不同节奏适合不同场景，可以随时切换</string>
     <string name="settings_cycles">循环轮数</string>
     <string name="settings_cycles_subtitle">1 – 12 轮可选，建议每天 4–8 轮，初次可从 4 轮开始</string>
-    <string name="settings_sound">温柔女声提示</string>
-    <string name="settings_sound_desc">在每个阶段开始时用中文女声播报</string>
+    <string name="settings_prompts">训练提示</string>
+    <string name="settings_voice_prompt">女声提示</string>
+    <string name="settings_voice_prompt_desc">各阶段用舒缓中文女声逐步引导（预录音频，不依赖系统语音）</string>
+    <string name="settings_chime_prompt">颂钵提示</string>
+    <string name="settings_chime_prompt_desc">每个阶段开始时的颂钵声，作为节奏边界（不与人声重叠）</string>
     <string name="settings_music">舒缓背景音乐</string>
     <string name="settings_music_desc">训练期间循环播放柔和的环境音</string>
     <string name="settings_keep_screen_on">训练时保持屏幕常亮</string>
@@ -84,13 +87,13 @@
     <string name="settings_ambient">环境音</string>
     <string name="settings_ambient_subtitle">训练期间循环播放，选中的音源会随设置立即生效</string>
 
-    <!-- 设置中的播报方式分组 -->
-    <string name="settings_voice_style">播报方式</string>
-    <string name="settings_voice_style_subtitle">温柔女声以单词或长句引导呼吸，可随时切换</string>
-    <string name="voice_style_short_name">单词</string>
-    <string name="voice_style_short_desc">"吸气 / 屏息 / 呼气 / 停顿"，节奏更紧凑。</string>
-    <string name="voice_style_long_name">温柔长句（推荐）</string>
-    <string name="voice_style_long_desc">"慢慢地吸气，让气息充满腹部"等整句引导，更放松。</string>
+    <!-- 设置中的发声性别分组 -->
+    <string name="settings_voice_gender">声音性别</string>
+    <string name="settings_voice_gender_subtitle">女声或男声引导，可随时切换；引导词相同，仅音色不同</string>
+    <string name="voice_gender_female_name">女声</string>
+    <string name="voice_gender_female_desc">温柔的中文女声，逐步引导呼吸。</string>
+    <string name="voice_gender_male_name">男声</string>
+    <string name="voice_gender_male_desc">沉静的中文男声，稳定陪伴。</string>
 
     <!-- 通用 -->
     <string name="back">返回</string>
