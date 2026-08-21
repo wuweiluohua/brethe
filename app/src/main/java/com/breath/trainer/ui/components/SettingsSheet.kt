@@ -29,13 +29,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.breath.trainer.R
 import com.breath.trainer.audio.AmbientSound
-import com.breath.trainer.audio.VoiceStyle
+import com.breath.trainer.audio.VoiceGender
 import com.breath.trainer.breathing.pattern.BreathingPattern
 import com.breath.trainer.breathing.pattern.BreathingPatterns
 import com.breath.trainer.ui.TrainerUiSettings
 
 /**
- * 设置底部抽屉：呼吸节奏、环境音、循环轮数、播报方式、声音、背景音乐、保持屏幕常亮。
+ * 设置底部抽屉：呼吸节奏、环境音、循环轮数、播报方式、女声提示、音阶提示、背景音乐、保持屏幕常亮。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -44,14 +44,15 @@ fun SettingsSheet(
     settings: TrainerUiSettings,
     patterns: List<BreathingPattern>,
     ambients: List<AmbientSound>,
-    voiceStyles: List<VoiceStyle>,
+    voiceGenders: List<VoiceGender>,
     onRoundsChange: (Int) -> Unit,
-    onSoundChange: (Boolean) -> Unit,
+    onVoicePromptChange: (Boolean) -> Unit,
+    onChimePromptChange: (Boolean) -> Unit,
     onMusicChange: (Boolean) -> Unit,
     onKeepScreenOnChange: (Boolean) -> Unit,
     onPatternChange: (BreathingPattern) -> Unit,
     onAmbientChange: (AmbientSound) -> Unit,
-    onVoiceStyleChange: (VoiceStyle) -> Unit,
+    onVoiceGenderChange: (VoiceGender) -> Unit,
     themeMode: Int = 0,
     onThemeModeChange: (Int) -> Unit = {},
     onDismiss: () -> Unit,
@@ -233,26 +234,26 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 播报方式（单词 / 长句）
+            // 声音性别（女声 / 男声）
             Text(
-                text = stringResource(id = R.string.settings_voice_style),
+                text = stringResource(id = R.string.settings_voice_gender),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = stringResource(id = R.string.settings_voice_style_subtitle),
+                text = stringResource(id = R.string.settings_voice_gender_subtitle),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(12.dp))
 
             // 改用卡片列表风格，与"环境音"分组保持一致：每条带 RadioButton + 名称 + 描述。
-            VoiceStyleCardList(
-                styles = voiceStyles,
-                selected = settings.voiceStyle,
-                onSelect = onVoiceStyleChange,
+            VoiceGenderCardList(
+                genders = voiceGenders,
+                selected = settings.voiceGender,
+                onSelect = onVoiceGenderChange,
             )
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -279,12 +280,27 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            ToggleRow(
-                title = stringResource(id = R.string.settings_sound),
-                checked = settings.soundEnabled,
-                onCheckedChange = onSoundChange,
-                description = stringResource(id = R.string.settings_sound_desc),
+            // 训练提示：女声提示 / 音阶提示 两个独立开关
+            Text(
+                text = stringResource(id = R.string.settings_prompts),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            ToggleRow(
+                title = stringResource(id = R.string.settings_voice_prompt),
+                checked = settings.voicePromptEnabled,
+                onCheckedChange = onVoicePromptChange,
+                description = stringResource(id = R.string.settings_voice_prompt_desc),
+            )
+            ToggleRow(
+                title = stringResource(id = R.string.settings_chime_prompt),
+                checked = settings.chimePromptEnabled,
+                onCheckedChange = onChimePromptChange,
+                description = stringResource(id = R.string.settings_chime_prompt_desc),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             ToggleRow(
                 title = stringResource(id = R.string.settings_music),
                 checked = settings.musicEnabled,
@@ -346,25 +362,25 @@ private fun ToggleRow(
 private const val MAX_ROUNDS: Int = 12
 
 /**
- * 卡片列表风格的播报方式选择器。
+ * 卡片列表风格的声音性别选择器。
  *
  * 与"环境音"分组使用完全一致的视觉：每条卡片带 RadioButton + 名称 + 描述，选中态用 primaryContainer。
  */
 @Composable
-private fun VoiceStyleCardList(
-    styles: List<VoiceStyle>,
-    selected: VoiceStyle,
-    onSelect: (VoiceStyle) -> Unit,
+private fun VoiceGenderCardList(
+    genders: List<VoiceGender>,
+    selected: VoiceGender,
+    onSelect: (VoiceGender) -> Unit,
 ) {
-    styles.forEach { style ->
-        val isSelected = style == selected
-        val nameRes = when (style) {
-            VoiceStyle.SHORT -> R.string.voice_style_short_name
-            VoiceStyle.GENTLE_LONG -> R.string.voice_style_long_name
+    genders.forEach { gender ->
+        val isSelected = gender == selected
+        val nameRes = when (gender) {
+            VoiceGender.FEMALE -> R.string.voice_gender_female_name
+            VoiceGender.MALE -> R.string.voice_gender_male_name
         }
-        val descRes = when (style) {
-            VoiceStyle.SHORT -> R.string.voice_style_short_desc
-            VoiceStyle.GENTLE_LONG -> R.string.voice_style_long_desc
+        val descRes = when (gender) {
+            VoiceGender.FEMALE -> R.string.voice_gender_female_desc
+            VoiceGender.MALE -> R.string.voice_gender_male_desc
         }
         androidx.compose.material3.Surface(
             color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
@@ -375,7 +391,7 @@ private fun VoiceStyleCardList(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)
-                .clickable { onSelect(style) },
+                .clickable { onSelect(gender) },
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -383,7 +399,7 @@ private fun VoiceStyleCardList(
             ) {
                 androidx.compose.material3.RadioButton(
                     selected = isSelected,
-                    onClick = { onSelect(style) },
+                    onClick = { onSelect(gender) },
                 )
                 Spacer(modifier = Modifier.size(8.dp))
                 Column(modifier = Modifier.fillMaxWidth()) {

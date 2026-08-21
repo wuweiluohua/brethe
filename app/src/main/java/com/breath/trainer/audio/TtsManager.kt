@@ -4,24 +4,26 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
-import android.os.Build
-import android.speech.tts.TextToSpeech
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.breath.trainer.R
-import java.util.Locale
+import com.breath.trainer.breathing.pattern.BreathingStep
 
 /**
- * 管理训练期间的提示音：
- * 1) 优先使用系统 [TextToSpeech] 引擎的"温柔女声"合成语音。
- * 2) 如果 TTS 引擎未就绪/语言不支持，则降级播放本地柔和钟音。
+ * 管理训练期间的提示音（按「呼吸训练小程序声音制作参数 V1.0」规范）：
  *
- * 必须配合 AndroidManifest 中的 TTS_SERVICE 查询才能在 Android 11+ 找到引擎。
+ * 1) 颂钵提示（阶段边界）：每个呼吸阶段开始播放 [R.raw.bowl_stage_01]；
+ *    训练结束播放 [R.raw.bowl_complete_01]。由 SoundPool 低延迟播放，不与人声重叠。
+ *
+ * 2) 人声提示（预录音频）：按「节奏 id（478 / 426 / box）× 阶段（inhale / hold / exhale）
+ *    × 性别（f / m）」选择对应 voice_*.wav，由 edge-tts 神经网络语音预先生成，
+ *    避免各设备自带 TTS 声音生硬或识别能力弱导致读错字。运行时不再调用系统 TextToSpeech。
+ *
+ * 播放序列（规范 6）：颂钵 → 150~300ms 留白 → 人声；本类在 [playStage] / [playComplete]
+ * 内部用主线程 Handler 延迟 ~220ms / ~400ms 触发人声，两个提示由调用方传入的开关独立控制。
  */
 class TtsManager(private val appContext: Context) {
-
-    private var tts: TextToSpeech? = null
-    private var ttsReady: Boolean = false
-    private val tag = "TtsManager"
 
     private val soundPool: SoundPool by lazy {
         val attrs = AudioAttributes.Builder()
@@ -29,144 +31,141 @@ class TtsManager(private val appContext: Context) {
             .setUsage(AudioAttributes.USAGE_GAME)
             .build()
         SoundPool.Builder()
-            .setMaxStreams(2)
+            .setMaxStreams(4)
             .setAudioAttributes(attrs)
             .build()
     }
 
-    private var chimeInhaleId: Int = 0
-    private var chimeExhaleId: Int = 0
-    private var chimePhaseId: Int = 0
+    private val tag = "TtsManager"
+
+    // 颂钵
+    private var bowlStageId: Int = 0
+    private var bowlCompleteId: Int = 0
+
+    // 人声提示：key = "${gender}_${mode}_${step}" 或 "${gender}_complete"
+    private val voiceIds = mutableMapOf<String, Int>()
+
     private var soundsLoaded = false
 
-    /** 初始化 TTS 与音效，异步完成后才会正常播报。 */
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendingVoiceRunnable: Runnable? = null
+
+    // 用于暂停时停止正在播放的提示
+    private var lastVoiceStreamId: Int = 0
+    private var lastBowlStreamId: Int = 0
+
+    /** 初始化音效，异步加载完成后才会正常播放。 */
     fun initialize(onReady: ((Boolean) -> Unit)? = null) {
-        // 预加载所有音效
-        chimeInhaleId = soundPool.load(appContext, R.raw.chime_breath_in, 1)
-        chimeExhaleId = soundPool.load(appContext, R.raw.chime_breath_out, 1)
-        chimePhaseId = soundPool.load(appContext, R.raw.chime_phase, 1)
+        // 颂钵
+        bowlStageId = soundPool.load(appContext, R.raw.bowl_stage_01, 1)
+        bowlCompleteId = soundPool.load(appContext, R.raw.bowl_complete_01, 1)
+
+        // 人声：gender(f/m) × mode(478/426/box) × step(inhale/hold/exhale)
+        voiceIds["f_478_inhale"] = soundPool.load(appContext, R.raw.voice_f_inhale_478, 1)
+        voiceIds["f_478_hold"] = soundPool.load(appContext, R.raw.voice_f_hold_478, 1)
+        voiceIds["f_478_exhale"] = soundPool.load(appContext, R.raw.voice_f_exhale_478, 1)
+        voiceIds["f_426_inhale"] = soundPool.load(appContext, R.raw.voice_f_inhale_426, 1)
+        voiceIds["f_426_hold"] = soundPool.load(appContext, R.raw.voice_f_hold_426, 1)
+        voiceIds["f_426_exhale"] = soundPool.load(appContext, R.raw.voice_f_exhale_426, 1)
+        voiceIds["f_box_inhale"] = soundPool.load(appContext, R.raw.voice_f_inhale_box, 1)
+        voiceIds["f_box_hold"] = soundPool.load(appContext, R.raw.voice_f_hold_box, 1)
+        voiceIds["f_box_exhale"] = soundPool.load(appContext, R.raw.voice_f_exhale_box, 1)
+
+        voiceIds["m_478_inhale"] = soundPool.load(appContext, R.raw.voice_m_inhale_478, 1)
+        voiceIds["m_478_hold"] = soundPool.load(appContext, R.raw.voice_m_hold_478, 1)
+        voiceIds["m_478_exhale"] = soundPool.load(appContext, R.raw.voice_m_exhale_478, 1)
+        voiceIds["m_426_inhale"] = soundPool.load(appContext, R.raw.voice_m_inhale_426, 1)
+        voiceIds["m_426_hold"] = soundPool.load(appContext, R.raw.voice_m_hold_426, 1)
+        voiceIds["m_426_exhale"] = soundPool.load(appContext, R.raw.voice_m_exhale_426, 1)
+        voiceIds["m_box_inhale"] = soundPool.load(appContext, R.raw.voice_m_inhale_box, 1)
+        voiceIds["m_box_hold"] = soundPool.load(appContext, R.raw.voice_m_hold_box, 1)
+        voiceIds["m_box_exhale"] = soundPool.load(appContext, R.raw.voice_m_exhale_box, 1)
+
+        // 结束提示
+        voiceIds["f_complete"] = soundPool.load(appContext, R.raw.voice_f_complete_01, 1)
+        voiceIds["m_complete"] = soundPool.load(appContext, R.raw.voice_m_complete_01, 1)
+
         soundPool.setOnLoadCompleteListener { _, _, _ -> soundsLoaded = true }
-
-        tts = TextToSpeech(appContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                configureTts(onReady)
-            } else {
-                Log.w(tag, "TTS engine init failed: status=$status")
-                ttsReady = false
-                onReady?.invoke(false)
-            }
-        }
-    }
-
-    private fun configureTts(onReady: ((Boolean) -> Unit)?) {
-        val engine = tts ?: return
-        // 尝试以中文为默认语言；如不支持再回退到英文
-        val locale = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            listOf(Locale.SIMPLIFIED_CHINESE, Locale.CHINESE, Locale.US)
-                .firstOrNull { engine.isLanguageAvailable(it) >= TextToSpeech.LANG_AVAILABLE }
-                ?: Locale.getDefault()
-        } else {
-            Locale.getDefault()
-        }
-
-        engine.language = locale
-        engine.setPitch(1.05f)        // 略升调，更柔和亲切
-        // 旧值 0.48 太慢：长句"慢慢地吸气，让气息充满腹部"用 0.48x 念完接近 5 秒，
-        // 而 INHALE 阶段只有 4 秒，下一阶段 start() 时会把上一句截断，听起来像没有语音。
-        // 0.85 是兼顾"温柔不催促"和"能完整播完"的经验值。
-        engine.setSpeechRate(0.85f)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            // 选择女声音色：很多系统会命名为 "female" / "Female"
-            try {
-                val femaleVoice = engine.voices?.firstOrNull {
-                    it.locale == locale &&
-                            (it.name.contains("female", ignoreCase = true) ||
-                                    it.name.contains("xiaoxiao", ignoreCase = true) ||
-                                    it.name.contains("yaoyao", ignoreCase = true))
-                }
-                if (femaleVoice != null) {
-                    engine.voice = femaleVoice
-                }
-            } catch (e: Exception) {
-                Log.w(tag, "Failed to pick a female voice: ${e.message}")
-            }
-        }
-
-        ttsReady = true
+        // 资源较小，加载通常在数百毫秒内完成；SoundPool 加载完成后即可播放。
         onReady?.invoke(true)
     }
 
-    /** 说出阶段指令；同时播放短暂的氛围提示音。 */
-    fun speakPhase(text: String, fallbackChime: Boolean = true, flush: Boolean = false) {
-        val message = text.trim()
-        if (message.isEmpty()) return
+    /**
+     * 播放某一阶段的提示：先播颂钵（若 [bowlEnabled]），约 220ms 后再播人声（若 [voiceEnabled]）。
+     * [mode] 为节奏 id（"478" / "426" / "box"），[stepKind] 为当前阶段。
+     */
+    fun playStage(
+        gender: VoiceGender,
+        mode: String,
+        stepKind: BreathingStep.StepKind,
+        voiceEnabled: Boolean,
+        bowlEnabled: Boolean,
+    ) {
+        if (!soundsLoaded) return
 
-        // TTS 通道（长句 TTS 推荐 flush，避免上一句尾音拖到下一段）。
-        // 训练开始时 ttsReady 可能是 false：TTS 引擎初始化是异步的，
-        // 用户可能在 onInit 回调完成之前就点了开始。这种情况下也要尝试 speak，
-        // 让 TTS 引擎内部排队，等就绪后自动播出来，避免静默。
-        val t = tts
-        if (t != null) {
-            try {
-                val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                val result = t.speak(message, mode, null, "phase-${System.currentTimeMillis()}")
-                if (result == TextToSpeech.ERROR) {
-                    Log.w(tag, "TTS speak returned ERROR for: $message")
-                } else if (!ttsReady) {
-                    // speak 成功但 ttsReady 还是 false：等引擎就绪会自动播放。
-                    Log.i(tag, "TTS queued (not ready yet): $message")
-                }
-            } catch (e: Exception) {
-                Log.w(tag, "TTS speak failed, fallback to chime: ${e.message}")
-            }
-        } else {
-            Log.w(tag, "TTS engine is null, cannot speak: $message")
+        if (bowlEnabled) {
+            if (lastBowlStreamId != 0) soundPool.stop(lastBowlStreamId)
+            lastBowlStreamId = soundPool.play(bowlStageId, 0.9f, 0.9f, 1, 0, 1.0f)
         }
 
-        // 同时播放柔和音效
-        if (fallbackChime && soundsLoaded) {
-            // 提示音小一些用于补充
-            soundPool.play(chimePhaseId, 0.4f, 0.4f, 1, 0, 1.0f)
+        if (voiceEnabled) {
+            val id = voiceKeyId(gender, mode, stepKind) ?: return
+            scheduleVoice(id, 220L)
         }
     }
 
-    fun playInhaleChime() {
+    /** 训练结束提示：先播结束颂钵（若 [bowlEnabled]），约 400ms 后再播结束人声（若 [voiceEnabled]）。 */
+    fun playComplete(gender: VoiceGender, voiceEnabled: Boolean, bowlEnabled: Boolean) {
         if (!soundsLoaded) return
-        soundPool.play(chimeInhaleId, 0.6f, 0.6f, 2, 0, 1.0f)
+
+        if (bowlEnabled) {
+            if (lastBowlStreamId != 0) soundPool.stop(lastBowlStreamId)
+            lastBowlStreamId = soundPool.play(bowlCompleteId, 0.9f, 0.9f, 1, 0, 1.0f)
+        }
+
+        if (voiceEnabled) {
+            val id = voiceIds[if (gender == VoiceGender.FEMALE) "f_complete" else "m_complete"] ?: return
+            scheduleVoice(id, 400L)
+        }
     }
 
-    fun playExhaleChime() {
-        if (!soundsLoaded) return
-        soundPool.play(chimeExhaleId, 0.65f, 0.65f, 2, 0, 1.0f)
+    private fun scheduleVoice(sampleId: Int, delayMs: Long) {
+        pendingVoiceRunnable?.let { handler.removeCallbacks(it) }
+        val runnable = Runnable {
+            if (lastVoiceStreamId != 0) soundPool.stop(lastVoiceStreamId)
+            lastVoiceStreamId = soundPool.play(sampleId, 0.9f, 0.9f, 1, 0, 1.0f)
+        }
+        pendingVoiceRunnable = runnable
+        handler.postDelayed(runnable, delayMs)
     }
 
-    /** 屏息阶段播报的轻钟声（吸气后屏息/呼气后屏息共用）。 */
-    fun playHoldChime(variant: Int = 0) {
-        if (!soundsLoaded) return
-        // 盒式第二段屏息使用略不同的小钟声（用 rate 微调区分）
-        val rate = if (variant == 1) 0.94f else 1.05f
-        soundPool.play(chimePhaseId, 0.45f, 0.45f, 1, 0, rate)
+    private fun voiceKeyId(gender: VoiceGender, mode: String, stepKind: BreathingStep.StepKind): Int? {
+        val g = if (gender == VoiceGender.FEMALE) "f" else "m"
+        val step = when (stepKind) {
+            BreathingStep.StepKind.INHALE -> "inhale"
+            BreathingStep.StepKind.HOLD_AFTER_INHALE -> "hold"
+            BreathingStep.StepKind.EXHALE -> "exhale"
+            // 盒式第二段屏息与第一段屏息共用同一段引导词
+            BreathingStep.StepKind.HOLD_AFTER_EXHALE -> "hold"
+        }
+        val m = if (mode in setOf("478", "426", "box")) mode else "478"
+        return voiceIds["${g}_${m}_${step}"]
     }
 
-    /** 暂停并清空 TTS 队列。 */
+    /** 暂停：取消待播人声并停止正在播放的颂钵/人声。 */
     fun pause() {
-        tts?.stop()
+        pendingVoiceRunnable?.let { handler.removeCallbacks(it) }
+        pendingVoiceRunnable = null
+        if (lastVoiceStreamId != 0) soundPool.stop(lastVoiceStreamId)
+        if (lastBowlStreamId != 0) soundPool.stop(lastBowlStreamId)
     }
 
     /** 完全释放资源。 */
     fun release() {
         try {
-            tts?.stop()
-            tts?.shutdown()
+            soundPool.release()
         } catch (e: Exception) {
-            Log.w(tag, "Error shutting down tts: ${e.message}")
+            Log.w(tag, "Error releasing soundPool: ${e.message}")
         }
-        tts = null
-        ttsReady = false
-        soundPool.release()
     }
-
-    /** 当前是否使用了女声合成（用于在设置中提示）。 */
-    fun isFemaleVoiceReady(): Boolean = ttsReady
 }

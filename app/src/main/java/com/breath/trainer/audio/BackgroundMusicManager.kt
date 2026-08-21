@@ -12,7 +12,7 @@ import java.io.IOException
 /**
  * 后台循环播放器：根据 [ambient] 在不同 [AmbientSound] 之间切换。
  *
- * - 默认播放 [AmbientSounds.CALM] 的 30 秒循环氛围音。
+ * - 默认播放 [AmbientSounds.OCEAN] 的 30 秒循环氛围音。
  * - 通过 [AudioAttributes] 标记为 [USAGE_MEDIA]，音量跟随系统媒体音量，避免与 TTS 抢流。
  * - 切音源时先 stop 再 start，状态在 enabled=false 时静默。
  */
@@ -31,7 +31,7 @@ class BackgroundMusicManager(private val appContext: Context) {
 
     /** 当前激活的环境音。 */
     @Volatile
-    var ambient: AmbientSound = AmbientSounds.CALM
+    var ambient: AmbientSound = AmbientSounds.OCEAN
         set(value) {
             val same = value.id == field.id
             field = value

@@ -5,10 +5,9 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.breath.trainer.BreathApplication
-import com.breath.trainer.R
 import com.breath.trainer.audio.AmbientSound
 import com.breath.trainer.audio.AmbientSounds
-import com.breath.trainer.audio.VoiceStyle
+import com.breath.trainer.audio.VoiceGender
 import com.breath.trainer.breathing.BreathingEngine
 import com.breath.trainer.breathing.pattern.BreathingPattern
 import com.breath.trainer.breathing.pattern.BreathingPatterns
@@ -26,26 +25,28 @@ private const val MAX_ROUNDS: Int = 12
 data class TrainerUiSettings(
     val pattern: BreathingPattern = BreathingPatterns.FOUR_SEVEN_EIGHT,
     val totalRounds: Int = BreathingPatterns.FOUR_SEVEN_EIGHT.totalRounds,
-    val soundEnabled: Boolean = true,
+    val voicePromptEnabled: Boolean = true,
+    val chimePromptEnabled: Boolean = true,
     val musicEnabled: Boolean = true,
     val keepScreenOn: Boolean = true,
-    val ambient: AmbientSound = AmbientSounds.CALM,
-    val voiceStyle: VoiceStyle = VoiceStyle.GENTLE_LONG,
+    val ambient: AmbientSound = AmbientSounds.OCEAN,
+    val voiceGender: VoiceGender = VoiceGender.FEMALE,
     val themeMode: Int = 0,
 )
 
 /** 开关标志位 + 主题模式：合并后避免和 audio / pattern 一起塞进同一个 8-flow combine。 */
 private data class TrainerFlags(
-    val sound: Boolean,
+    val voicePrompt: Boolean,
+    val chimePrompt: Boolean,
     val music: Boolean,
     val keepScreenOn: Boolean,
     val themeMode: Int,
 )
 
-/** 音频偏好：环境音 + 播报方式。 */
+/** 音频偏好：环境音 + 发声性别。 */
 private data class TrainerAudioPrefs(
     val ambient: AmbientSound,
-    val voiceStyle: VoiceStyle,
+    val voiceGender: VoiceGender,
 )
 
 /** 节奏 + 轮数：耦合在一起，轮数要 clamp 到 MAX_ROUNDS（用户最多 12 轮）。 */
@@ -59,61 +60,26 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     private val app = application as BreathApplication
 
     private val engine = BreathingEngine(app.ttsManager).also { e ->
-        // 训练开始（READY 阶段）一次性热身播报：节奏名称 + "准备开始"。
-        e.onTrainStart = {
-            if (uiSettings.value.soundEnabled) {
-                val startRes = when (uiSettings.value.pattern.id) {
-                    "426" -> R.string.tts_start_426
-                    "box" -> R.string.tts_start_box
-                    else -> R.string.tts_start_478
-                }
-                app.ttsManager.speakPhase(app.getString(startRes), flush = true)
-            }
-        }
+        // 训练开始（READY 阶段）不再播报"这是哪种训练法"——用户要求取消该提示音。
+        // 引擎仍会触发 onTrainStart，但此处不接任何播报。
 
-        e.onPhaseStart = { stepKind, round ->
-            // 触感反馈已移除。
-
-            if (uiSettings.value.soundEnabled) {
-                // 每一步（含首轮首吸）都按当前播报方式正常播报对应指令，
-                // 首步不再插播"准备开始"——那句由 onTrainStart 在训练开始时播一次。
-                val stepShortRes = when (stepKind) {
-                    BreathingStep.StepKind.INHALE -> R.string.tts_inhale
-                    BreathingStep.StepKind.HOLD_AFTER_INHALE -> R.string.tts_hold_inhale
-                    BreathingStep.StepKind.EXHALE -> R.string.tts_exhale
-                    BreathingStep.StepKind.HOLD_AFTER_EXHALE -> R.string.tts_hold_exhale
-                }
-                val stepLongRes = when (stepKind) {
-                    BreathingStep.StepKind.INHALE -> R.string.tts_phrase_inhale
-                    BreathingStep.StepKind.HOLD_AFTER_INHALE -> R.string.tts_phrase_hold_inhale
-                    BreathingStep.StepKind.EXHALE -> R.string.tts_phrase_exhale
-                    BreathingStep.StepKind.HOLD_AFTER_EXHALE -> R.string.tts_phrase_hold_exhale
-                }
-                val phrase = if (uiSettings.value.voiceStyle == VoiceStyle.SHORT) {
-                    app.getString(stepShortRes)
-                } else {
-                    app.getString(stepLongRes)
-                }
-                // 单词 / 长句都使用 flush：上一句若还在播就立刻截断，节奏与口播保持同步。
-                // 长句若不 flush，慢速 TTS 会被下一阶段卡住、听起来像没提示。
-                app.ttsManager.speakPhase(phrase, flush = true)
-
-                when (stepKind) {
-                    BreathingStep.StepKind.INHALE -> app.ttsManager.playInhaleChime()
-                    BreathingStep.StepKind.EXHALE -> app.ttsManager.playExhaleChime()
-                    BreathingStep.StepKind.HOLD_AFTER_EXHALE -> app.ttsManager.playHoldChime(variant = 1)
-                    BreathingStep.StepKind.HOLD_AFTER_INHALE -> app.ttsManager.playHoldChime(variant = 0)
-                }
-            }
-
-            // 用 round 简单回调（保留 hook）
-            @Suppress("UNUSED_PARAMETER")
-            val r = round
+        e.onPhaseStart = { stepKind, _ ->
+            // 颂钵提示 + 女声提示按规范序列播放（钵 → ~220ms → 人声），
+            // 两者分别由 chimePromptEnabled（颂钵）/ voicePromptEnabled（人声）独立控制。
+            app.ttsManager.playStage(
+                gender = uiSettings.value.voiceGender,
+                mode = uiSettings.value.pattern.id,
+                stepKind = stepKind,
+                voiceEnabled = uiSettings.value.voicePromptEnabled,
+                bowlEnabled = uiSettings.value.chimePromptEnabled,
+            )
         }
         e.onTrainFinished = {
-            if (uiSettings.value.soundEnabled) {
-                app.ttsManager.speakPhase(app.getString(R.string.tts_finish), flush = true)
-            }
+            app.ttsManager.playComplete(
+                gender = uiSettings.value.voiceGender,
+                voiceEnabled = uiSettings.value.voicePromptEnabled,
+                bowlEnabled = uiSettings.value.chimePromptEnabled,
+            )
         }
     }
 
@@ -133,21 +99,22 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private val flagsFlow: Flow<TrainerFlags> = combine(
-        app.settingsRepository.soundEnabled,
+        app.settingsRepository.voicePromptEnabled,
+        app.settingsRepository.chimePromptEnabled,
         app.settingsRepository.musicEnabled,
         app.settingsRepository.keepScreenOn,
         app.settingsRepository.themeMode,
-    ) { sound, music, keep, theme ->
-        TrainerFlags(sound, music, keep, theme)
+    ) { voice, chime, music, keep, theme ->
+        TrainerFlags(voice, chime, music, keep, theme)
     }
 
     private val audioPrefsFlow: Flow<TrainerAudioPrefs> = combine(
         app.settingsRepository.ambientId,
-        app.settingsRepository.voiceStyleId,
-    ) { ambientId, voiceStyleId ->
+        app.settingsRepository.voiceGenderId,
+    ) { ambientId, voiceGenderId ->
         TrainerAudioPrefs(
             ambient = AmbientSounds.findById(ambientId),
-            voiceStyle = VoiceStyle.fromId(voiceStyleId),
+            voiceGender = VoiceGender.fromId(voiceGenderId),
         )
     }
 
@@ -159,11 +126,12 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         TrainerUiSettings(
             pattern = pr.pattern,
             totalRounds = pr.totalRounds,
-            soundEnabled = flags.sound,
+            voicePromptEnabled = flags.voicePrompt,
+            chimePromptEnabled = flags.chimePrompt,
             musicEnabled = flags.music,
             keepScreenOn = flags.keepScreenOn,
             ambient = audio.ambient,
-            voiceStyle = audio.voiceStyle,
+            voiceGender = audio.voiceGender,
             themeMode = flags.themeMode,
         )
     }.stateIn(
@@ -172,8 +140,8 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         initialValue = TrainerUiSettings(),
     )
 
-    /** 可选的播报方式列表（按 UI 顺序）。 */
-    val availableVoiceStyles: List<VoiceStyle> = listOf(VoiceStyle.SHORT, VoiceStyle.GENTLE_LONG)
+    /** 可选的发声性别列表（按 UI 顺序）。 */
+    val availableVoiceGenders: List<VoiceGender> = listOf(VoiceGender.FEMALE, VoiceGender.MALE)
 
     /** 当前可用的所有节奏。 */
     val availablePatterns: List<BreathingPattern> = BreathingPatterns.ALL
@@ -222,8 +190,12 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         engine.setTotalRounds(value)
     }
 
-    fun setSoundEnabled(value: Boolean) = viewModelScope.launch {
-        app.settingsRepository.setSoundEnabled(value)
+    fun setVoicePromptEnabled(value: Boolean) = viewModelScope.launch {
+        app.settingsRepository.setVoicePromptEnabled(value)
+    }
+
+    fun setChimePromptEnabled(value: Boolean) = viewModelScope.launch {
+        app.settingsRepository.setChimePromptEnabled(value)
     }
 
     fun setMusicEnabled(value: Boolean) = viewModelScope.launch {
@@ -242,8 +214,8 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun selectVoiceStyle(style: VoiceStyle) = viewModelScope.launch {
-        app.settingsRepository.setVoiceStyleId(style.id)
+    fun selectVoiceGender(gender: VoiceGender) = viewModelScope.launch {
+        app.settingsRepository.setVoiceGenderId(gender.id)
     }
 
     fun setThemeMode(value: Int) = viewModelScope.launch {

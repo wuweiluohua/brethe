@@ -6,7 +6,7 @@ import com.breath.trainer.R
 /**
  * 一段循环播放的环境音。
  *
- * - [id] 持久化到 DataStore（默认 `calm`）。
+ * - [id] 持久化到 DataStore（默认 `ocean`）。
  * - [nameRes] / [descriptionRes] 用于设置 UI 展示。
  * - [rawResId] 指向 res/raw 下的音频文件（MP3/WAV，由 Pixabay 录制素材或程序合成）。
  */
