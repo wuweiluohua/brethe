@@ -127,20 +127,6 @@ jobs:
           ls "$ANDROID_HOME/platforms/"
           ls "$ANDROID_HOME/build-tools/"
 
-      - name: Generate Version Number
-        run: |
-          # 组合版本号：例如 1.0.35 (基于 run_number) 加上短 commit hash
-          VERSION="1.0.${{ github.run_number }}-${{ github.sha }}"
-          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Generated Version: $VERSION"
-
-
-      - name: Inject Version into Project
-        run: |
-          # 示例：将版本号写入配置文件或通过环境变量传递给编译命令
-          echo "Injecting version into build..."
-          #sed -i "s/VERSION_PLACEHOLDER/$APP_VERSION/g" ./config.json
-
 
       - name: Assemble debug APK
         id: assembleDebug
@@ -156,8 +142,8 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: breath-trainer-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: breath-trainer-debugv-1.0.${{ github.run_number }}
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
