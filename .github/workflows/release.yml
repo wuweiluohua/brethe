@@ -15,14 +15,18 @@ concurrency:
 permissions:
   contents: read
 
-# 仅当仓库配置了 BREATH_RELEASE_KEYSTORE_BASE64 密钥时才运行；
-# 没配密钥时整个工作流被跳过（不会失败），配齐 4 个 Secrets 后自动产出带固定签名的 release 包。
+# 说明：GitHub Actions 的 `if:` 不允许引用 `secrets` 上下文（job/step 级 if 仅支持
+# github / needs / vars / inputs）。因此本工作流不在 if 里直接判断密钥。
+# 改为：第一步读取密钥是否配置，输出 configured 标志；其余步骤用
+# `if: steps.cfg.outputs.configured == 'true'` 门控。
+# 未配置密钥时整个发布流程被干净跳过（绿色、不报错）；
+# 配齐 4 个 Secrets 后自动产出带固定签名的 release 包。
+
 jobs:
   release:
     name: Build release APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: ${{ secrets.BREATH_RELEASE_KEYSTORE_BASE64 != '' }}
     env:
       # 与 app/build.gradle.kts 中的 compileSdk = 34 / targetSdk = 34 保持一致
       ANDROID_API_LEVEL: '34'
@@ -31,27 +35,46 @@ jobs:
       CMDLINE_TOOLS_VERSION: '11076708'
 
     steps:
+      # 第一步：读取 release 密钥是否配置（secrets 仅可在 run/env 中使用，不能在 if 中使用）
+      - name: Check release configuration
+        id: cfg
+        env:
+          KEYSTORE_B64: ${{ secrets.BREATH_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Release secrets detected — will build signed release."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Release secrets NOT configured — skipping release build."
+          fi
+
       - name: Checkout
+        if: steps.cfg.outputs.configured == 'true'
         uses: actions/checkout@v4
 
       - name: Set Android SDK path
+        if: steps.cfg.outputs.configured == 'true'
         run: |
           echo "ANDROID_HOME=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
 
       - name: Set up JDK 17 (Temurin)
+        if: steps.cfg.outputs.configured == 'true'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Setup Gradle (with cache)
+        if: steps.cfg.outputs.configured == 'true'
         uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
       - name: Restore Android SDK
         id: cache-sdk
+        if: steps.cfg.outputs.configured == 'true'
         uses: actions/cache@v4
         with:
           path: ${{ env.ANDROID_HOME }}
@@ -61,7 +84,7 @@ jobs:
             android-sdk-platform-
 
       - name: Install Android SDK (cmdline-tools + platforms + build-tools)
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        if: steps.cfg.outputs.configured == 'true' && steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
           set -e
           mkdir -p "$ANDROID_HOME/cmdline-tools"
@@ -78,20 +101,25 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-${ANDROID_API_LEVEL}" "build-tools;${ANDROID_BUILD_TOOLS}"
 
       - name: Write local.properties
+        if: steps.cfg.outputs.configured == 'true'
         run: echo "sdk.dir=${ANDROID_HOME}" > local.properties
 
       # 从 Secret 还原 release 钥匙（base64 编码的 keystore 文件）
       - name: Reconstruct release keystore
+        if: steps.cfg.outputs.configured == 'true'
         run: echo "${{ secrets.BREATH_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > keystore/release.jks
 
       - name: Make gradlew executable
+        if: steps.cfg.outputs.configured == 'true'
         run: chmod +x ./gradlew
 
       # 用 -P 注入签名密码（与 app/build.gradle.kts 的 releaseProp() 对应）
       - name: Assemble release APK + AAB
+        if: steps.cfg.outputs.configured == 'true'
         run: ./gradlew :app:assembleRelease :app:bundleRelease --stacktrace -PBREATH_RELEASE_STORE_PASSWORD="${{ secrets.BREATH_RELEASE_STORE_PASSWORD }}" -PBREATH_RELEASE_KEY_ALIAS="${{ secrets.BREATH_RELEASE_KEY_ALIAS }}" -PBREATH_RELEASE_KEY_PASSWORD="${{ secrets.BREATH_RELEASE_KEY_PASSWORD }}"
 
       - name: Upload release APK
+        if: steps.cfg.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: breath-trainer-release-apk
@@ -100,6 +128,7 @@ jobs:
           retention-days: 30
 
       - name: Upload release AAB
+        if: steps.cfg.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: breath-trainer-release-aab
@@ -112,4 +141,8 @@ jobs:
         run: |
           echo "### 🫁 BreathTrainer Release CI 结果" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Release build: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.cfg.outputs.configured }}" = "true" ]; then
+            echo "- Release build: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Release build: skipped (release secrets not configured)" >> $GITHUB_STEP_SUMMARY
+          fi
