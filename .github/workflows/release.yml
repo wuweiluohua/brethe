@@ -150,7 +150,23 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: ./gradlew :app:assembleRelease :app:bundleRelease --stacktrace -PBREATH_RELEASE_STORE_PASSWORD="${{ secrets.BREATH_RELEASE_STORE_PASSWORD }}" -PBREATH_RELEASE_KEY_ALIAS="${{ secrets.BREATH_RELEASE_KEY_ALIAS }}" -PBREATH_RELEASE_KEY_PASSWORD="${{ secrets.BREATH_RELEASE_KEY_PASSWORD }}"
 
-      # 发布到 GitHub Releases：创建 tag 并上传 APK / AAB
+      # 把产物重命名为带版本号的名字：breath-trainer-<version>-release.(apk|aab)
+      - name: Rename artifacts with version
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          set -e
+          VER="${{ steps.ver.outputs.version }}"
+          APK_SRC="app/build/outputs/apk/release/app-release.apk"
+          AAB_SRC="app/build/outputs/bundle/release/app-release.aab"
+          if [ ! -f "$APK_SRC" ] || [ ! -f "$AAB_SRC" ]; then
+            echo "::error::未找到构建产物：$APK_SRC 或 $AAB_SRC"
+            exit 1
+          fi
+          cp "$APK_SRC" "breath-trainer-${VER}-release.apk"
+          cp "$AAB_SRC" "breath-trainer-${VER}-release.aab"
+          echo "Renamed artifacts to breath-trainer-${VER}-release.(apk|aab)"
+
+      # 发布到 GitHub Releases：创建 tag 并上传带版本号的 APK / AAB
       - name: Publish to GitHub Releases
         if: steps.cfg.outputs.configured == 'true'
         uses: softprops/action-gh-release@v2
@@ -158,8 +174,8 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: BreathTrainer ${{ steps.ver.outputs.version }}
           files: |
-            app/build/outputs/apk/release/app-release.apk
-            app/build/outputs/bundle/release/app-release.aab
+            breath-trainer-${{ steps.ver.outputs.version }}-release.apk
+            breath-trainer-${{ steps.ver.outputs.version }}-release.aab
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
         env:
