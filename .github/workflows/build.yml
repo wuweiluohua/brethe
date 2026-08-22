@@ -142,7 +142,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: breath-trainer-debugv-1.0.${{ github.run_number }}
+          name: breath-trainer-debug-1.0.${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
