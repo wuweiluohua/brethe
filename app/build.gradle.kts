@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -23,12 +25,15 @@ android {
 
     // 从 local.properties（已被 .gitignore，放密钥最安全）与 -P 命令行参数中读取发布签名信息。
     // CI 通过 GitHub Secrets 以 -P 形式注入；本地开发把同一组值写进 local.properties 即可。
-    val localProps = java.util.Properties().also { props ->
+    val localProps = Properties().also { props ->
         val f = rootProject.file("local.properties")
         if (f.exists()) f.inputStream().use { props.load(it) }
     }
-    fun releaseProp(name: String, default: String = ""): String =
-        (project.findProperty(name) as? String) ?: localProps.getProperty(name) ?: default
+    fun releaseProp(name: String, default: String = ""): String {
+        val fromCli = project.findProperty(name)
+        if (fromCli is String) return fromCli
+        return localProps.getProperty(name) ?: default
+    }
 
     signingConfigs {
         // 固定 debug 密钥：已提交进仓库（keystore/debug.keystore），本地与 CI 共用同一把 →
