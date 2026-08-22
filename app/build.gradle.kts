@@ -66,6 +66,10 @@ android {
             signingConfig = signingConfigs.getByName("breathDebug")
         }
         release {
+            // 重新开启 R8（混淆 + 压缩）。已定位并修复发布版启动闪退：
+            // R8 的 optimize 曾把 Compose 的 LocalLifecycleOwner CompositionLocal provider 误删，
+            // 导致 collectAsStateWithLifecycle 报 "CompositionLocal LocalLifecycleOwner not present"。
+            // proguard-rules.pro 已加 -keep 规则保留 Compose/Lifecycle 相关类，避免 provider 被剥离。
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
