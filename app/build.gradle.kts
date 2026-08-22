@@ -39,7 +39,8 @@ android {
         // 固定 debug 密钥：已提交进仓库（keystore/debug.keystore），本地与 CI 共用同一把 →
         // 覆盖安装不再因"每次构建重新生成 debug 钥匙"而报证书冲突。debug 密钥不涉密，可入库。
         create("breathDebug") {
-            storeFile = file("keystore/debug.keystore")
+            // 仓库根目录 keystore/（与 local.properties 同级的 rootProject.file 语义一致）
+            storeFile = rootProject.file("keystore/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
@@ -47,7 +48,8 @@ android {
         // 固定 release 密钥：keystore/release.jks（已被 .gitignore，不入库）。
         // 密码从 local.properties 或 -P 传入。
         create("breathRelease") {
-            storeFile = file("keystore/release.jks")
+            // 仓库根目录 keystore/（release.jks 由 CI 从 Secret 还原到此处）
+            storeFile = rootProject.file("keystore/release.jks")
             storePassword = releaseProp("BREATH_RELEASE_STORE_PASSWORD")
             keyAlias = releaseProp("BREATH_RELEASE_KEY_ALIAS", "breath")
             keyPassword = releaseProp("BREATH_RELEASE_KEY_PASSWORD")
