@@ -35,7 +35,7 @@ import com.breath.trainer.breathing.pattern.BreathingPatterns
 import com.breath.trainer.ui.TrainerUiSettings
 
 /**
- * 设置底部抽屉：呼吸节奏、环境音、循环轮数、播报方式、女声提示、音阶提示、背景音乐、保持屏幕常亮。
+ * 设置底部抽屉：呼吸节奏、环境音、循环轮数、声音引导、声音提示、节奏提示、背景音乐、保持屏幕常亮。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -234,7 +234,7 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 声音性别（女声 / 男声）
+            // 声音引导（女声 / 男声）
             Text(
                 text = stringResource(id = R.string.settings_voice_gender),
                 style = MaterialTheme.typography.titleMedium,
@@ -280,7 +280,7 @@ fun SettingsSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 训练提示：女声提示 / 音阶提示 两个独立开关
+            // 训练提示：声音提示 / 节奏提示 两个独立开关
             Text(
                 text = stringResource(id = R.string.settings_prompts),
                 style = MaterialTheme.typography.titleMedium,

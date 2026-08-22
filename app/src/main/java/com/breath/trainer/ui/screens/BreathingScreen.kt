@@ -235,7 +235,10 @@ fun BreathingScreen(
         onVoiceGenderChange = viewModel::selectVoiceGender,
         themeMode = uiSettings.themeMode,
         onThemeModeChange = viewModel::setThemeMode,
-        onDismiss = { settingsVisible = false },
+        onDismiss = {
+            viewModel.stopAmbientPreview()
+            settingsVisible = false
+        },
     )
 }
 

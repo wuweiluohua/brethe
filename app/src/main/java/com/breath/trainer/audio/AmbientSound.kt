@@ -81,7 +81,7 @@ object AmbientSounds {
     )
 
     val ALL: List<AmbientSound> = listOf(
-        CALM, RAIN, BIRDS, BIRDS_LONG, OCEAN, OCEAN_LONG, STREAM, CAMPFIRE,
+        RAIN, BIRDS, BIRDS_LONG, OCEAN, OCEAN_LONG, STREAM, CAMPFIRE, CALM,
     )
 
     fun findById(id: String?): AmbientSound =

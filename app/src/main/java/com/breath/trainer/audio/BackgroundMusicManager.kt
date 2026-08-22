@@ -6,6 +6,8 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.io.IOException
 
@@ -20,6 +22,15 @@ class BackgroundMusicManager(private val appContext: Context) {
 
     private var player: MediaPlayer? = null
     private val tag = "BackgroundMusic"
+
+    /**
+     * 设置界面预览用的独立播放器（与训练循环播放器 [player] 互不干扰）。
+     * 选中环境音后试听 30 秒，若用户继续操作则被 [stopPreview] 立刻中断。
+     */
+    private var previewPlayer: MediaPlayer? = null
+    private val previewHandler = Handler(Looper.getMainLooper())
+    private val previewStopRunnable = Runnable { stopPreview() }
+    private val previewDurationMs = 30_000L
 
     /** 是否启用循环播放。 */
     @Volatile
@@ -124,6 +135,51 @@ class BackgroundMusicManager(private val appContext: Context) {
             Log.w(tag, "stop failed: ${e.message}")
         } finally {
             player = null
+        }
+    }
+
+    /**
+     * 设置界面里试听某个环境音：独立 [previewPlayer] 循环播放该音源，
+     * 并在 [previewDurationMs]（默认 30 秒）后自动停止。
+     * 再次调用会先停掉上一段预览再起新的，因此连续点选多个环境音不会叠加。
+     */
+    fun startPreview(ambient: AmbientSound) {
+        stopPreview()
+        try {
+            val mp = MediaPlayer()
+            applyAudioAttributes(mp)
+            mp.setOnPreparedListener { p ->
+                p.isLooping = true
+                p.setVolume(volume, volume)
+                p.start()
+                Log.i(tag, "ambient preview started: ${ambient.id}")
+            }
+            mp.setOnErrorListener { _, what, extra ->
+                Log.e(tag, "preview MediaPlayer error what=$what extra=$extra (ambient=${ambient.id})")
+                stopPreview()
+                true
+            }
+            openResource(mp, ambient.rawResId)
+            previewPlayer = mp
+            previewHandler.postDelayed(previewStopRunnable, previewDurationMs)
+        } catch (e: Exception) {
+            Log.e(tag, "startPreview failed: ${e.message}")
+            stopPreview()
+        }
+    }
+
+    /** 立即停止设置界面的环境音试听（取消自动停止计时）。 */
+    fun stopPreview() {
+        previewHandler.removeCallbacks(previewStopRunnable)
+        try {
+            previewPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "stopPreview failed: ${e.message}")
+        } finally {
+            previewPlayer = null
         }
     }
 }

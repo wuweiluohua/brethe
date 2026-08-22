@@ -75,6 +75,8 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         e.onTrainFinished = {
+            // 训练自然结束后必须停掉环境音，否则背景音会一直循环（用户反馈的 bug）。
+            app.backgroundMusic.stop()
             app.ttsManager.playComplete(
                 gender = uiSettings.value.voiceGender,
                 voiceEnabled = uiSettings.value.voicePromptEnabled,
@@ -152,6 +154,8 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     /** 启动训练 */
     fun start() {
         try {
+            // 若设置页预览还在响，开训时立即中断，避免两段环境音叠加
+            app.backgroundMusic.stopPreview()
             val settings = uiSettings.value
             val pattern = settings.pattern
             engine.setPattern(pattern)
@@ -173,6 +177,7 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectPattern(pattern: BreathingPattern) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setPatternId(pattern.id)
         // 不再根据节奏 default 强行下调用户的 totalRounds；用户已选 12 轮就保持 12 轮。
         // 切换节奏时若正在训练，先停掉 TTS / 音乐 / 引擎，回到新节奏的"准备好"起始界面。
@@ -186,39 +191,57 @@ class TrainerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setTotalRounds(value: Int) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setTotalRounds(value)
         engine.setTotalRounds(value)
     }
 
     fun setVoicePromptEnabled(value: Boolean) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setVoicePromptEnabled(value)
     }
 
     fun setChimePromptEnabled(value: Boolean) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setChimePromptEnabled(value)
     }
 
     fun setMusicEnabled(value: Boolean) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setMusicEnabled(value)
         app.backgroundMusic.enabled = value
     }
 
     fun setKeepScreenOn(value: Boolean) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setKeepScreenOn(value)
     }
 
     fun selectAmbient(ambient: AmbientSound) = viewModelScope.launch {
         app.settingsRepository.setAmbientId(ambient.id)
-        if (uiSettings.value.musicEnabled) {
-            app.backgroundMusic.ambient = ambient
+        // 记住选择，供训练时使用（即便当前关闭了背景音乐开关也照常记录）。
+        app.backgroundMusic.ambient = ambient
+        if (engine.state.value.running) {
+            // 训练中改选：直接热切换训练背景音，不再另起预览
+            app.backgroundMusic.stopPreview()
+        } else {
+            // 设置界面选音：试听 30s；若用户继续其它操作，stopAmbientPreview 会立刻中断
+            app.backgroundMusic.startPreview(ambient)
         }
     }
 
+    /** 停止设置界面的环境音试听（被其它设置操作、关掉抽屉、开始训练时调用）。 */
+    fun stopAmbientPreview() {
+        app.backgroundMusic.stopPreview()
+    }
+
     fun selectVoiceGender(gender: VoiceGender) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setVoiceGenderId(gender.id)
     }
 
     fun setThemeMode(value: Int) = viewModelScope.launch {
+        app.backgroundMusic.stopPreview()
         app.settingsRepository.setThemeMode(value)
     }
 
