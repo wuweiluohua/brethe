@@ -1,49 +1,45 @@
 name: release
 
-# 当推送形如 v1.0.0 的 tag 时自动构建 + 发版；
-# 也可以在 Actions 页面手动触发（手动触发的 versionName 默认为 input 指定的）
 on:
   push:
-    tags:
-      - 'v*.*.*'
-      - 'v*.*.*-*'
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
   workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Tag name to apply (e.g. v1.1.0). 留空则只构建并上传 artifact，不发 Release。'
-        required: false
-        default: ''
+
+# 同一个分支的最新运行自动取消，避免堆积
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write   # 用来创建 GitHub Release
+  contents: read
 
+# 仅当仓库配置了 BREATH_RELEASE_KEYSTORE_BASE64 密钥时才运行；
+# 没配密钥时整个工作流被跳过（不会失败），配齐 4 个 Secrets 后自动产出带固定签名的 release 包。
 jobs:
   release:
-    name: Build release APK & publish
+    name: Build release APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 60
-
+    if: ${{ secrets.BREATH_RELEASE_KEYSTORE_BASE64 != '' }}
     env:
-      # SDK 安装到 runner 临时目录，与每个 job 隔离；路径固定便于 cache 命中
-      # ANDROID_HOME: ${{ RUNNER_TEMP }}/android-sdk
+      # 与 app/build.gradle.kts 中的 compileSdk = 34 / targetSdk = 34 保持一致
       ANDROID_API_LEVEL: '34'
       ANDROID_BUILD_TOOLS: '34.0.0'
+      # cmdline-tools Aug 2024 release（兼容 AGP 8.5）
       CMDLINE_TOOLS_VERSION: '11076708'
-      
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
 
       - name: Set Android SDK path
         run: |
           echo "ANDROID_HOME=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$RUNNER_TEMP/android-sdk" >> $GITHUB_ENV
 
-      - name: Set up JDK 17
+      - name: Set up JDK 17 (Temurin)
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -51,18 +47,15 @@ jobs:
 
       - name: Setup Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
       - name: Restore Android SDK
         id: cache-sdk
         uses: actions/cache@v4
         with:
           path: ${{ env.ANDROID_HOME }}
-          key: >-
-            android-sdk-
-            platform-${{ env.ANDROID_API_LEVEL }}-
-            buildtools-${{ env.ANDROID_BUILD_TOOLS }}-
-            cmdline-${{ env.CMDLINE_TOOLS_VERSION }}-
-            ${{ hashFiles('**/build.gradle.kts', '**/app/build.gradle.kts') }}
+          key: android-sdk-platform-${{ env.ANDROID_API_LEVEL }}-buildtools-${{ env.ANDROID_BUILD_TOOLS }}-cmdline-${{ env.CMDLINE_TOOLS_VERSION }}-${{ hashFiles('**/build.gradle.kts', '**/app/build.gradle.kts') }}
           restore-keys: |
             android-sdk-platform-${{ env.ANDROID_API_LEVEL }}-
             android-sdk-platform-
@@ -73,138 +66,50 @@ jobs:
           set -e
           mkdir -p "$ANDROID_HOME/cmdline-tools"
           cd "$ANDROID_HOME/cmdline-tools"
-          curl -fsSL -o cmdline-tools.zip \
-            "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip"
+          curl -fsSL -o cmdline-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip"
           unzip -q cmdline-tools.zip
           rm -f cmdline-tools.zip
-          if [ -d latest ]; then
-            : # 已是最新的目录结构
-          elif [ -d cmdline-tools ]; then
+          rm -rf latest
+          if [ -d cmdline-tools ]; then
             mv cmdline-tools latest
           fi
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          sdkmanager --version
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-${ANDROID_API_LEVEL}" \
-            "build-tools;${ANDROID_BUILD_TOOLS}"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-${ANDROID_API_LEVEL}" "build-tools;${ANDROID_BUILD_TOOLS}"
 
       - name: Write local.properties
-        run: echo "sdk.dir=${ANDROID_HOME}" >> local.properties
+        run: echo "sdk.dir=${ANDROID_HOME}" > local.properties
 
-      - name: Resolve release tag & versionName
-        id: meta
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            TAG_NAME=${GITHUB_REF_NAME}
-          else
-            TAG_NAME="${{ github.event.inputs.tag_name }}"
-          fi
-          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
-          # 形如 v1.0.0 -> 1.0.0；v1.0.0-rc1 -> 1.0.0-rc1
-          if [ -n "${TAG_NAME}" ]; then
-            VERSION_NAME=${TAG_NAME#v}
-          else
-            VERSION_NAME="1.0.0"
-          fi
-          echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_OUTPUT
-          echo "Release target: ${TAG_NAME:-<manual>}"
+      # 从 Secret 还原 release 钥匙（base64 编码的 keystore 文件）
+      - name: Reconstruct release keystore
+        run: echo "${{ secrets.BREATH_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > keystore/release.jks
 
-      # ----------- 可选：使用真实 release keystore -----------
-      # 如果用户在仓库 Secrets 中配置了 keystore，则用其签名 release APK；
-      # 否则退回到项目默认（debug keystore 签名）——APK 可安装但不推荐用于正式分发。
-      - name: Decode release keystore (optional)
-        id: keystore
-        if: ${{ env.BREATH_TRAINER_KEYSTORE != '' }}
-        env:
-          BREATH_TRAINER_KEYSTORE: ${{ secrets.BREATH_TRAINER_KEYSTORE }}
-        run: |
-          mkdir -p app/keystore
-          echo "$BREATH_TRAINER_KEYSTORE" | base64 -d > app/keystore/release.jks
-          ls -la app/keystore/release.jks
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
 
-      - name: Build release APK
-        id: buildRelease
-        run: |
-          set -e
-          ARGS=":app:assembleRelease"
-          if [ -f app/keystore/release.jks ]; then
-            cat >> gradle.properties <<EOF
-          BREATH_RELEASE_STORE_FILE=release.jks
-          BREATH_RELEASE_STORE_PASSWORD=${{ secrets.BREATH_TRAINER_KEYSTORE_PASSWORD }}
-          BREATH_RELEASE_KEY_ALIAS=${{ secrets.BREATH_TRAINER_KEY_ALIAS }}
-          BREATH_RELEASE_KEY_PASSWORD=${{ secrets.BREATH_TRAINER_KEY_PASSWORD }}
-          EOF
-            ARGS="${ARGS} -PbreathReleaseSigning=true"
-          fi
-          ./gradlew ${ARGS} --stacktrace
+      # 用 -P 注入签名密码（与 app/build.gradle.kts 的 releaseProp() 对应）
+      - name: Assemble release APK + AAB
+        run: ./gradlew :app:assembleRelease :app:bundleRelease --stacktrace -PBREATH_RELEASE_STORE_PASSWORD="${{ secrets.BREATH_RELEASE_STORE_PASSWORD }}" -PBREATH_RELEASE_KEY_ALIAS="${{ secrets.BREATH_RELEASE_KEY_ALIAS }}" -PBREATH_RELEASE_KEY_PASSWORD="${{ secrets.BREATH_RELEASE_KEY_PASSWORD }}"
 
-      - name: Collect APK(s)
-        id: collect
-        run: |
-          set -e
-          mkdir -p dist
-          cp -v app/build/outputs/apk/release/*.apk dist/ || true
-          ls -la dist/
-          echo "ARTIFACTS=$(ls dist/*.apk | tr '\n' ' ')" >> $GITHUB_OUTPUT
-
-      - name: Compute SHA-256
-        if: steps.collect.outputs.ARTIFACTS != ''
-        run: |
-          for f in dist/*.apk; do
-            sha256sum "$f" | tee "${f}.sha256"
-          done
-
-      - name: Generate changelog (commit history since last tag)
-        if: steps.meta.outputs.TAG_NAME != ''
-        id: changelog
-        run: |
-          set -e
-          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | grep -v "^${GITHUB_REF_NAME}$" | head -n 1 || echo "")
-          if [ -n "${PREV_TAG}" ]; then
-            RANGE="${PREV_TAG}..${GITHUB_REF_NAME}"
-          else
-            RANGE="${GITHUB_REF_NAME}"
-          fi
-          echo "Changelog range: ${RANGE}"
-          {
-            echo "## 更新内容"
-            echo ""
-            if [ -n "${PREV_TAG}" ]; then
-              echo "_自 ${PREV_TAG} 起的变更_"
-            else
-              echo "_首次发布_"
-            fi
-            echo ""
-            git log ${RANGE} --pretty=format:'- %s (%h)' --no-merges
-          } > RELEASE_NOTES.md
-          cat RELEASE_NOTES.md
-
-      # 只有在真正推送 tag 时才创建 GitHub Release；
-      # 手动触发的（无 TAG_NAME）只把 APK 作为 artifact 上传
-      - name: Upload release artifacts
-        if: steps.collect.outputs.ARTIFACTS != ''
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: breath-trainer-release-${{ steps.meta.outputs.VERSION_NAME }}
-          path: |
-            dist/*.apk
-            dist/*.sha256
+          name: breath-trainer-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30
 
-      - name: Create GitHub Release
-        if: steps.meta.outputs.TAG_NAME != ''
-        uses: softprops/action-gh-release@v2
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.meta.outputs.TAG_NAME }}
-          name: ${{ steps.meta.outputs.TAG_NAME }}
-          body_path: RELEASE_NOTES.md
-          draft: false
-          prerelease: ${{ contains(steps.meta.outputs.TAG_NAME, '-') }}
-          files: |
-            dist/*.apk
-            dist/*.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: breath-trainer-release-aab
+          path: app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### 🫁 BreathTrainer Release CI 结果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Release build: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
