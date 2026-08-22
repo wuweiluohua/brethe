@@ -1,11 +1,20 @@
 name: release
 
+# 仅手动触发：在 Actions 页面选择 "Run workflow"。
+# 触发前请确保：
+#   1. 已在仓库 Settings → Secrets 配齐 4 个 Secret（BREATH_RELEASE_KEYSTORE_BASE64 等）
+#   2. 已在本发版中提升了 app/build.gradle.kts 的 versionName 与 versionCode
 on:
-  push:
-    branches: [ main, master, develop ]
-  pull_request:
-    branches: [ main, master, develop ]
   workflow_dispatch:
+    inputs:
+      version:
+        description: '发版版本号（如 1.0.1）。留空则自动读取 app/build.gradle.kts 的 versionName。'
+        required: false
+        default: ''
+      prerelease:
+        description: '是否标记为预发布'
+        required: false
+        default: 'false'
 
 # 同一个分支的最新运行自动取消，避免堆积
 concurrency:
@@ -13,18 +22,11 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
-
-# 说明：GitHub Actions 的 `if:` 不允许引用 `secrets` 上下文（job/step 级 if 仅支持
-# github / needs / vars / inputs）。因此本工作流不在 if 里直接判断密钥。
-# 改为：第一步读取密钥是否配置，输出 configured 标志；其余步骤用
-# `if: steps.cfg.outputs.configured == 'true'` 门控。
-# 未配置密钥时整个发布流程被干净跳过（绿色、不报错）；
-# 配齐 4 个 Secrets 后自动产出带固定签名的 release 包。
+  contents: write   # 需要 write 才能创建 GitHub Release 与 tag
 
 jobs:
   release:
-    name: Build release APK + AAB
+    name: Build & publish release APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -35,23 +37,53 @@ jobs:
       CMDLINE_TOOLS_VERSION: '11076708'
 
     steps:
-      # 第一步：读取 release 密钥是否配置（secrets 仅可在 run/env 中使用，不能在 if 中使用）
+      # GitHub Actions 的 if: 不允许引用 secrets 上下文，故首步在 env 读密钥，
+      # 判断非空后输出 configured 标志；未配置则直接报错退出（手动触发应当明确失败）。
       - name: Check release configuration
         id: cfg
         env:
           KEYSTORE_B64: ${{ secrets.BREATH_RELEASE_KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-            echo "Release secrets detected — will build signed release."
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Release secrets NOT configured — skipping release build."
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::未配置 BREATH_RELEASE_KEYSTORE_BASE64 等 Secrets，无法签名发布。请在仓库 Settings → Secrets 配齐 4 个 Secret 后重试。"
+            exit 1
           fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "Release secrets detected — will build signed release."
 
       - name: Checkout
         if: steps.cfg.outputs.configured == 'true'
         uses: actions/checkout@v4
+
+      # 读取 app 版本号作为发版 tag，保证 Releases 与 app 版本一致
+      - name: Determine version
+        id: ver
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          VER=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          CODE=$(grep -oP 'versionCode\s*=\s*\K\d+' app/build.gradle.kts | head -1)
+          if [ -z "$VER" ] || [ -z "$CODE" ]; then
+            echo "::error::无法从 app/build.gradle.kts 读取 versionName/versionCode"
+            exit 1
+          fi
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VER="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VER (versionCode=$CODE, tag v$VER)"
+
+      # 版本号更新检查：同一版本不允许重复发布
+      - name: Check version not already released
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          EXISTS=$(git ls-remote --tags origin "refs/tags/$TAG" | wc -l)
+          if [ "$EXISTS" -gt 0 ]; then
+            echo "::error::Tag $TAG 已存在，说明该版本已发布。请在 app/build.gradle.kts 提升 versionName 与 versionCode 后再发版。"
+            exit 1
+          fi
+          echo "Tag $TAG 为全新版本，允许发布。"
 
       - name: Set Android SDK path
         if: steps.cfg.outputs.configured == 'true'
@@ -70,7 +102,7 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         uses: gradle/actions/setup-gradle@v4
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+          cache-read-only: false
 
       - name: Restore Android SDK
         id: cache-sdk
@@ -118,23 +150,20 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: ./gradlew :app:assembleRelease :app:bundleRelease --stacktrace -PBREATH_RELEASE_STORE_PASSWORD="${{ secrets.BREATH_RELEASE_STORE_PASSWORD }}" -PBREATH_RELEASE_KEY_ALIAS="${{ secrets.BREATH_RELEASE_KEY_ALIAS }}" -PBREATH_RELEASE_KEY_PASSWORD="${{ secrets.BREATH_RELEASE_KEY_PASSWORD }}"
 
-      - name: Upload release APK
+      # 发布到 GitHub Releases：创建 tag 并上传 APK / AAB
+      - name: Publish to GitHub Releases
         if: steps.cfg.outputs.configured == 'true'
-        uses: actions/upload-artifact@v4
+        uses: softprops/action-gh-release@v2
         with:
-          name: breath-trainer-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload release AAB
-        if: steps.cfg.outputs.configured == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: breath-trainer-release-aab
-          path: app/build/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 30
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: BreathTrainer ${{ steps.ver.outputs.version }}
+          files: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/bundle/release/app-release.aab
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         if: always()
@@ -142,7 +171,7 @@ jobs:
           echo "### 🫁 BreathTrainer Release CI 结果" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.cfg.outputs.configured }}" = "true" ]; then
-            echo "- Release build: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Release: ${{ steps.ver.outputs.tag }} → ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- Release build: skipped (release secrets not configured)" >> $GITHUB_STEP_SUMMARY
+            echo "- Release: skipped (secrets not configured)" >> $GITHUB_STEP_SUMMARY
           fi
