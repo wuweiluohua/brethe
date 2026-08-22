@@ -21,19 +21,31 @@ android {
         }
     }
 
-    // 若 -PbreathReleaseSigning=true 且 keystore 文件存在，则用其签名 release；
-    // 否则回退到 debug 签名（CI 默认行为：未配置 secrets 时也能产出可安装 APK）。
-    val useReleaseSigning = (project.findProperty("breathReleaseSigning") as? String) == "true" &&
-            file("keystore/release.jks").exists()
+    // 从 local.properties（已被 .gitignore，放密钥最安全）与 -P 命令行参数中读取发布签名信息。
+    // CI 通过 GitHub Secrets 以 -P 形式注入；本地开发把同一组值写进 local.properties 即可。
+    val localProps = java.util.Properties().also { props ->
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { props.load(it) }
+    }
+    fun releaseProp(name: String, default: String = ""): String =
+        (project.findProperty(name) as? String) ?: localProps.getProperty(name) ?: default
 
     signingConfigs {
+        // 固定 debug 密钥：已提交进仓库（keystore/debug.keystore），本地与 CI 共用同一把 →
+        // 覆盖安装不再因"每次构建重新生成 debug 钥匙"而报证书冲突。debug 密钥不涉密，可入库。
+        create("breathDebug") {
+            storeFile = file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+        // 固定 release 密钥：keystore/release.jks（已被 .gitignore，不入库）。
+        // 密码从 local.properties 或 -P 传入。
         create("breathRelease") {
-            if (useReleaseSigning) {
-                storeFile = file("keystore/release.jks")
-                storePassword = (project.findProperty("BREATH_RELEASE_STORE_PASSWORD") as? String) ?: ""
-                keyAlias = (project.findProperty("BREATH_RELEASE_KEY_ALIAS") as? String) ?: ""
-                keyPassword = (project.findProperty("BREATH_RELEASE_KEY_PASSWORD") as? String) ?: ""
-            }
+            storeFile = file("keystore/release.jks")
+            storePassword = releaseProp("BREATH_RELEASE_STORE_PASSWORD")
+            keyAlias = releaseProp("BREATH_RELEASE_KEY_ALIAS", "breath")
+            keyPassword = releaseProp("BREATH_RELEASE_KEY_PASSWORD")
         }
     }
 
@@ -43,6 +55,8 @@ android {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // 用固定 debug 钥匙签名，覆盖安装不再证书冲突
+            signingConfig = signingConfigs.getByName("breathDebug")
         }
         release {
             isMinifyEnabled = true
@@ -51,10 +65,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (useReleaseSigning)
-                signingConfigs.getByName("breathRelease")
-            else
-                signingConfigs.getByName("debug")
+            // 正式版固定用 release.jks（不再回退到 debug 钥匙）
+            signingConfig = signingConfigs.getByName("breathRelease")
         }
     }
 
